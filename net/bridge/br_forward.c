@@ -17,12 +17,20 @@
 #include <linux/netfilter_bridge.h>
 #include "br_private.h"
 
+#if defined(CONFIG_TP_IMAGE) && defined(CONFIG_BRIDGE_VLAN_TP)
+#include "br_vlan_tp.h"
+#endif
+
 /* Don't forward packets to originating port or forwarding disabled */
 static inline int should_deliver(const struct net_bridge_port *p,
 				 const struct sk_buff *skb)
 {
 	struct net_bridge_vlan_group *vg;
-
+	
+#if defined(CONFIG_TP_IMAGE) && defined(CONFIG_BRIDGE_VLAN_TP)
+		if(!br_vlan_forward_hook(p, skb))
+			return 0;
+#endif
 	vg = nbp_vlan_group_rcu(p);
 	return ((p->flags & BR_HAIRPIN_MODE) || skb->dev != p->dev) &&
 		br_allowed_egress(vg, skb) && p->state == BR_STATE_FORWARDING &&

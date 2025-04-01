@@ -97,6 +97,10 @@ struct compressor {
 
 #define DECOMP_ERROR		-1	/* error detected before decomp. */
 #define DECOMP_FATALERROR	-2	/* error detected after decomp. */
+#ifdef CONFIG_TP_IMAGE	
+#define DECOMP_DROP_PKT	-3	/* drop packet, add by wanghao */
+#endif /*CONFIG_TP_IMAGE*/
+
 
 extern int ppp_register_compressor(struct compressor *);
 extern void ppp_unregister_compressor(struct compressor *);

@@ -124,6 +124,22 @@ struct ppp_mppe_state {
 #define MPPE_OVHD	2	/* MPPE overhead/packet */
 #define SANITY_MAX	1600	/* Max bogon factor we will tolerate */
 
+#ifdef CONFIG_TP_IMAGE	
+/* add by wanghao  */
+static LIST_HEAD(pre_ccount_key_list);
+static LIST_HEAD(pre_ccount_key_unused_list);
+struct ccount_key_entry {
+	struct list_head list;
+	unsigned ccount;
+	unsigned char key[MPPE_MAX_KEY_LEN];
+};
+#define MAX_KEYLIST_LEN		16
+unsigned char keyList_len = 0;
+struct ccount_key_entry pre_ccount_key_array[MAX_KEYLIST_LEN];
+/* add end  */
+#endif /*CONFIG_TP_IMAGE*/
+
+
 /*
  * Key Derivation, from RFC 3078, RFC 3079.
  * Equivalent to Get_Key() for MS-CHAP as described in RFC 3079.
@@ -437,6 +453,12 @@ mppe_decompress(void *arg, unsigned char *ibuf, int isize, unsigned char *obuf,
 	struct ppp_mppe_state *state = (struct ppp_mppe_state *) arg;
 	unsigned ccount;
 	int flushed = MPPE_BITS(ibuf) & MPPE_BIT_FLUSHED;
+#ifdef CONFIG_TP_IMAGE	
+	/* add by wanghao  */
+	struct ccount_key_entry *ck_new = NULL;
+	struct ccount_key_entry *ck_tmp = NULL;
+	/* add end	*/
+#endif /*CONFIG_TP_IMAGE*/
 
 	if (isize <= PPP_HDRLEN + MPPE_OVHD) {
 		if (state->debug)
@@ -494,14 +516,60 @@ mppe_decompress(void *arg, unsigned char *ibuf, int isize, unsigned char *obuf,
 		/* Discard late packet */
 		if ((ccount - state->ccount) % MPPE_CCOUNT_SPACE
 						> MPPE_CCOUNT_SPACE / 2) {
+#ifdef CONFIG_TP_IMAGE	
+			/* add by wanghao  */
+			//find key in list
+			list_for_each_entry(ck_tmp, &pre_ccount_key_list, list) {
+				if (ck_tmp->ccount == ccount) {
+					//printk("found pre ccount key	ck_tmp->ccount=%x\n", ck_tmp->ccount);
+					arc4_setkey(&state->arc4, ck_tmp->key, state->keylen);
+					list_move(&ck_tmp->list, &pre_ccount_key_unused_list);
+					keyList_len--;
+					goto decry;
+				}
+			}
+			/* add end	*/
+#endif /*CONFIG_TP_IMAGE*/
+
 			state->sanity_errors++;
+#ifndef CONFIG_TP_IMAGE	
 			goto sanity_error;
+#else
+			return DECOMP_DROP_PKT;/* add by wanghao, drop this pkt  */
+#endif /*CONFIG_TP_IMAGE*/
+
 		}
 
 		/* RFC 3078, sec 8.1.  Rekey for every packet. */
 		while (state->ccount != ccount) {
 			mppe_rekey(state, 0);
 			state->ccount = (state->ccount + 1) % MPPE_CCOUNT_SPACE;
+#ifdef CONFIG_TP_IMAGE
+			/* add by wanghao  */
+			if (state->ccount != ccount) {//not in sequence
+				//check unused entry
+				if (list_empty(&pre_ccount_key_unused_list)) {
+					//delete the smallest ccount
+					struct ccount_key_entry *ck_smallest = list_first_entry(&pre_ccount_key_list, struct ccount_key_entry, list);
+					list_for_each_entry(ck_tmp, &pre_ccount_key_list, list) {
+						if (ck_tmp->ccount < ck_smallest->ccount) {
+							ck_smallest = ck_tmp;
+						}
+					}
+					list_move(&ck_smallest->list, &pre_ccount_key_unused_list);
+					keyList_len--;
+				}
+
+				//store key in list
+				ck_new = list_first_entry(&pre_ccount_key_unused_list, struct ccount_key_entry, list);
+				ck_new ->ccount = state->ccount;
+				memcpy(ck_new->key, state->session_key, state->keylen);
+				list_move(&ck_new->list, &pre_ccount_key_list);
+				keyList_len++;
+				//printk("add a pre_ccount_key entry	ck_new ->ccount=%x	keyList_len is %d\n", ck_new ->ccount, keyList_len);
+			}
+			/* add end	*/
+#endif /*CONFIG_TP_IMAGE*/
 		}
 	} else {
 		/* RFC 3078, sec 8.2. */
@@ -547,7 +615,10 @@ mppe_decompress(void *arg, unsigned char *ibuf, int isize, unsigned char *obuf,
 		if (flushed)
 			mppe_rekey(state, 0);
 	}
-
+	
+#ifdef CONFIG_TP_IMAGE
+decry:
+#endif /*CONFIG_TP_IMAGE*/
 	/*
 	 * Fill in the first part of the PPP header.  The protocol field
 	 * comes from the decrypted data.
@@ -674,6 +745,16 @@ static int __init ppp_mppe_init(void)
 		printk(KERN_INFO "PPP MPPE Compression module registered\n");
 	else
 		kfree(sha_pad);
+		
+#ifdef CONFIG_TP_IMAGE
+	/* add by wanghao, init unused list  */
+	unsigned char index = 0;
+	memset(pre_ccount_key_array, 0, sizeof(struct ccount_key_entry));
+	for (index = 0; index < MAX_KEYLIST_LEN; index++) {
+		list_add(&(pre_ccount_key_array + index)->list, &pre_ccount_key_unused_list);
+	}
+	/* add end	*/
+#endif /*CONFIG_TP_IMAGE*/
 
 	return answer;
 }

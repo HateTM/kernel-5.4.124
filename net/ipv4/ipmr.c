@@ -173,6 +173,7 @@ static int ipmr_rule_action(struct fib_rule *rule, struct flowi *flp,
 	case FR_ACT_UNREACHABLE:
 		return -ENETUNREACH;
 	case FR_ACT_PROHIBIT:
+	case FR_ACT_POLICY_FAILED:
 		return -EACCES;
 	case FR_ACT_BLACKHOLE:
 	default:
@@ -994,7 +995,11 @@ static struct mfc_cache *ipmr_cache_alloc_unres(void)
 
 	if (c) {
 		skb_queue_head_init(&c->_c.mfc_un.unres.unresolved);
+#ifdef CONFIG_TP_IMAGE
+		c->_c.mfc_un.unres.expires = jiffies + 1 * HZ;
+#else
 		c->_c.mfc_un.unres.expires = jiffies + 10 * HZ;
+#endif
 	}
 	return c;
 }
@@ -2014,6 +2019,20 @@ static void ip_mr_forward(struct net *net, struct mr_table *mrt,
 forward:
 	mrt->vif_table[vif].pkt_in++;
 	mrt->vif_table[vif].bytes_in += skb->len;
+
+#ifdef CONFIG_TP_IMAGE
+		if (ip_hdr(skb)->ttl <= 1)
+		{
+			/* prefix match */
+			if (strncmp(skb->dev->name, "br-lan", strlen("br-lan")))
+			{
+				ip_hdr(skb)->ttl = 128; /* set ttl back to 128 */
+				/* re calc csum. */
+				ip_hdr(skb)->check = 0;
+				ip_hdr(skb)->check = ip_fast_csum(skb_network_header(skb), ip_hdr(skb)->ihl);
+			}
+		}
+#endif
 
 	/* Forward the frame */
 	if (c->mfc_origin == htonl(INADDR_ANY) &&

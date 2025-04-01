@@ -823,6 +823,16 @@ config LEDS_LM36274
 	  Say Y to enable the LM36274 LED driver for TI LMU devices.
 	  This supports the LED device LM36274.
 
+config LEDS_UBNT_LEDBAR
+	tristate "LED support for Ubiquiti UniFi 6 LR"
+	depends on LEDS_CLASS && I2C && OF
+	help
+	  This option enables support for the Ubiquiti LEDBAR
+	  LED driver.
+
+	  To compile this driver as a module, choose M here: the module
+	  will be called leds-ubnt-ledbar.
+
 comment "LED Triggers"
 source "drivers/leds/trigger/Kconfig"
 

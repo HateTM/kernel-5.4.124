@@ -183,6 +183,54 @@ struct neigh_table arp_tbl = {
 };
 EXPORT_SYMBOL(arp_tbl);
 
+#ifdef CONFIG_TP_IMAGE
+
+#include <linux/timer.h>	/* Add by yangnaijun, 25Jan2013 */
+/* Add by yangnaijun, 25Jan2013 
+ * Limit the number of replies to bellow arp packets per seconds:
+ * 1. IP conflict garp packets.
+ * When receive such arp packets(in arp_process), we start a timer. The timer 
+ * reset the replay count(int arp_count) every ARP_RESP_INTERVAL. 
+ */
+#define ARP_COUNT_LIMIT 10		/* Limit in every interval. */
+#define ARP_RESP_INTERVAL (HZ * 2)	/* Interval to reset arp_count. */
+
+static struct timer_list arp_timer;
+static int arp_timer_on = 0;
+static int arp_count = 0;
+
+static void arp_timer_handle(struct timer_list * tl)
+{
+	arp_count = 0;
+	mod_timer(&arp_timer, jiffies + ARP_RESP_INTERVAL);
+}
+
+static void arp_timer_start(void)
+{
+	if (arp_timer_on)
+	{
+		return;
+	}
+
+	timer_setup(&arp_timer, arp_timer_handle, 0);
+	arp_timer.expires = jiffies + ARP_COUNT_LIMIT;
+	add_timer(&arp_timer);
+
+	arp_timer_on = 1;
+}
+static int ip_belong_to_dev(__be32 ip, struct in_device* in_dev)
+{
+	struct in_ifaddr *ifa_list = in_dev->ifa_list;
+	for (;ifa_list != NULL;ifa_list = ifa_list->ifa_next)
+	{
+		if (ifa_list->ifa_address == ip)
+			return 1;
+	}
+	return 0;
+}
+#endif/*CONFIG_TP_IMAGE*/
+
+
 int arp_mc_map(__be32 addr, u8 *haddr, struct net_device *dev, int dir)
 {
 	switch (dev->type) {
@@ -802,6 +850,27 @@ static int arp_process(struct net *net, struct sock *sk, struct sk_buff *skb)
 			    iptunnel_metadata_reply(skb_metadata_dst(skb),
 						    GFP_ATOMIC);
 
+#ifdef CONFIG_TP_IMAGE
+	if (ip_belong_to_dev(sip, in_dev) == 1) 		/* sender ip is our IP */							
+	{			
+		if (arp->ar_op == htons(ARPOP_REQUEST)){
+			if(net_ratelimit())
+				printk(" sender ip is our IP!!!\n");
+			arp_timer_start();		
+			if (arp_count < ARP_COUNT_LIMIT)
+			{
+				arp_count++;
+				/* reply to this bad boy */
+				arp_send(ARPOP_REPLY,ETH_P_ARP,sip,dev,sip,sha,dev->dev_addr,sha);
+				/* tell everyone I am the owner of this IP */
+				arp_send(ARPOP_REQUEST,ETH_P_ARP,sip,dev,sip,NULL,dev->dev_addr,NULL);
+				goto out_consume_skb;	
+			}		
+		}
+		goto out_consume_skb;				
+	}
+#endif/*CONFIG_TP_IMAGE*/
+
 	/* Special case: IPv4 duplicate address detection packet (RFC2131) */
 	if (sip == 0) {
 		if (arp->ar_op == htons(ARPOP_REQUEST) &&
@@ -834,7 +903,10 @@ static int arp_process(struct net *net, struct sock *sk, struct sk_buff *skb)
 					neigh_release(n);
 				}
 			}
+#ifndef CONFIG_TP_IMAGE
 			goto out_consume_skb;
+#endif
+
 		} else if (IN_DEV_FORWARD(in_dev)) {
 			if (addr_type == RTN_UNICAST  &&
 			    (arp_fwd_proxy(in_dev, dev, rt) ||
@@ -891,6 +963,32 @@ static int arp_process(struct net *net, struct sock *sk, struct sk_buff *skb)
 	if (n) {
 		int state = NUD_REACHABLE;
 		int override;
+
+#ifdef CONFIG_TP_IMAGE
+				
+		/* If we find arp request source mac has be conflicted with permanent
+		 * entry in arp table, then we need to send garp anyway.
+		 * Add by Jason Guo<guodongxian@tp-link.net>, 20140801
+		 */
+		struct timeval now;
+
+		#define GARP_INTERVAL 1 /* 1 second */
+
+		if ((n->nud_state & NUD_PERMANENT) && memcmp(sha, n->ha, dev->addr_len))
+		{
+			do_gettimeofday(&now);
+			if ((now.tv_sec - n->time_record.tv_sec) > GARP_INTERVAL || !n->time_record.tv_sec)
+			{
+				arp_send(ARPOP_REPLY, ETH_P_ARP, sip, dev, sip, sha, n->ha, sha);
+
+				arp_send(ARPOP_REQUEST, ETH_P_ARP, sip, dev, sip, NULL, n->ha, NULL);
+
+				n->time_record = now;
+			}
+			neigh_release(n);
+			goto out_consume_skb;
+		}
+#endif /*CONFIG_TP_IMAGE*/
 
 		/* If several different ARP replies follows back-to-back,
 		   use the FIRST one. It is possible, if several proxy

@@ -44,6 +44,12 @@
 #include <net/inet_ecn.h>
 #include <net/dst_metadata.h>
 
+#ifdef CONFIG_TP_IMAGE
+/* add for ipv6 pass through.*/
+int ipv6_pass_through_enable = 0;
+EXPORT_SYMBOL(ipv6_pass_through_enable);
+#endif /*CONFIG_TP_IMAGE*/
+
 INDIRECT_CALLABLE_DECLARE(void udp_v6_early_demux(struct sk_buff *));
 INDIRECT_CALLABLE_DECLARE(void tcp_v6_early_demux(struct sk_buff *));
 static void ip6_rcv_finish_core(struct net *net, struct sock *sk,
@@ -127,7 +133,12 @@ static struct sk_buff *ip6_rcv_core(struct sk_buff *skb, struct net_device *dev,
 	u32 pkt_len;
 	struct inet6_dev *idev;
 
+#ifndef CONFIG_TP_IMAGE
 	if (skb->pkt_type == PACKET_OTHERHOST) {
+#else
+	/* add for ipv6 pass through, we let the packets pass when ip6-bridge works*/
+	if ((skb->pkt_type == PACKET_OTHERHOST) && (ipv6_pass_through_enable == 0)){
+#endif /*CONFIG_TP_IMAGE*/
 		kfree_skb(skb);
 		return NULL;
 	}

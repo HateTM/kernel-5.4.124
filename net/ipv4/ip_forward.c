@@ -116,7 +116,26 @@ int ip_forward(struct sk_buff *skb)
 	 *	that the packet's lifetime expired.
 	 */
 	if (ip_hdr(skb)->ttl <= 1)
+#ifdef CONFIG_TP_IMAGE
+	{
+		/* When skb with TTL <= 1 send to wan, forward to lan, we need to set TTL = 128 */
+		/* Add by Jason Guo, 20140818 */
+		if (strncmp(skb->dev->name, "br", 2))
+		{
+			ip_hdr(skb)->ttl = 128; /* set ttl back to 128 */
+	
+			ip_hdr(skb)->check = 0x0000;
+			ip_hdr(skb)->check = ip_fast_csum((u8 *)(ip_hdr(skb)), ip_hdr(skb)->ihl);
+		}
+		else
+		{
+			goto too_many_hops;
+		}
+	}
+#else
 		goto too_many_hops;
+#endif /*CONFIG_TP_IMAGE*/
+
 
 	if (!xfrm4_route_forward(skb))
 		goto drop;

@@ -2413,6 +2413,8 @@ static int usb_enumerate_device(struct usb_device *udev)
 			if (err < 0)
 				dev_dbg(&udev->dev, "HNP fail, %d\n", err);
 		}
+
+		dev_info(&udev->dev, "Unsupported Device!\n");
 		return -ENOTSUPP;
 	}
 
@@ -4728,9 +4730,10 @@ hub_port_init(struct usb_hub *hub, struct usb_device *udev, int port1,
 				goto fail;
 			}
 			if (r) {
-				if (r != -ENODEV)
-					dev_err(&udev->dev, "device descriptor read/64, error %d\n",
-							r);
+				if (r != -ENODEV) {
+					dev_err(&udev->dev, "device descriptor read/64, error %d\n", r);
+					dev_info(&udev->dev, "Device No Respond\n");
+				}
 				retval = -EMSGSIZE;
 				continue;
 			}

@@ -62,6 +62,18 @@ struct dsa_notifier_vlan_info {
 	int port;
 };
 
+struct dsa_switchdev_event_work {
+	struct dsa_switch *ds;
+	int port;
+	struct work_struct work;
+	unsigned long event;
+	/* Specific for SWITCHDEV_FDB_ADD_TO_DEVICE and
+	 * SWITCHDEV_FDB_DEL_TO_DEVICE
+	 */
+	unsigned char addr[ETH_ALEN];
+	u16 vid;
+};
+
 struct dsa_slave_priv {
 	/* Copy of CPU port xmit for faster access in slave transmit hot path */
 	struct sk_buff *	(*xmit)(struct sk_buff *skb,
@@ -139,6 +151,7 @@ int dsa_port_bridge_join(struct dsa_port *dp, struct net_device *br);
 void dsa_port_bridge_leave(struct dsa_port *dp, struct net_device *br);
 int dsa_port_vlan_filtering(struct dsa_port *dp, bool vlan_filtering,
 			    struct switchdev_trans *trans);
+bool dsa_port_skip_vlan_configuration(struct dsa_port *dp);
 int dsa_port_ageing_time(struct dsa_port *dp, clock_t ageing_clock,
 			 struct switchdev_trans *trans);
 int dsa_port_fdb_add(struct dsa_port *dp, const unsigned char *addr,
@@ -179,9 +192,11 @@ void dsa_port_phylink_mac_link_down(struct phylink_config *config,
 				    unsigned int mode,
 				    phy_interface_t interface);
 void dsa_port_phylink_mac_link_up(struct phylink_config *config,
+				  struct phy_device *phydev,
 				  unsigned int mode,
 				  phy_interface_t interface,
-				  struct phy_device *phydev);
+				  int speed, int duplex,
+				  bool tx_pause, bool rx_pause);
 extern const struct phylink_mac_ops dsa_port_phylink_mac_ops;
 
 /* slave.c */
@@ -209,6 +224,19 @@ dsa_slave_to_master(const struct net_device *dev)
 	struct dsa_port *dp = dsa_slave_to_port(dev);
 
 	return dp->cpu_dp->master;
+}
+
+/* If the ingress port offloads the bridge, we mark the frame as autonomously
+ * forwarded by hardware, so the software bridge doesn't forward in twice, back
+ * to us, because we already did. However, if we're in fallback mode and we do
+ * software bridging, we are not offloading it, therefore the dp->bridge_dev
+ * pointer is not populated, and flooding needs to be done by software (we are
+ * effectively operating in standalone ports mode).
+ */
+static inline void dsa_default_offload_fwd_mark(struct sk_buff *skb)
+{
+      struct dsa_port *dp = dsa_slave_to_port(skb->dev);
+      skb->offload_fwd_mark = !!(dp->bridge_dev);
 }
 
 /* switch.c */

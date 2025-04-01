@@ -29,6 +29,14 @@ br_netif_receive_skb(struct net *net, struct sock *sk, struct sk_buff *skb)
 	return netif_receive_skb(skb);
 }
 
+#ifdef CONFIG_TP_HYFI_BRIDGE
+/* Hook for external Multicast handler */
+br_multicast_handle_hook_t __rcu *br_multicast_handle_hook __read_mostly;
+EXPORT_SYMBOL_GPL(br_multicast_handle_hook);/* Hook for external forwarding logic */
+br_get_dst_hook_t __rcu *br_get_dst_hook __read_mostly;
+EXPORT_SYMBOL_GPL(br_get_dst_hook);
+#endif /* CONFIG_TP_HYFI_BRIDGE */
+
 static int br_pass_frame_up(struct sk_buff *skb)
 {
 	struct net_device *indev, *brdev = BR_INPUT_SKB_CB(skb)->brdev;
@@ -77,6 +85,11 @@ int br_handle_frame_finish(struct net *net, struct sock *sk, struct sk_buff *skb
 	struct net_bridge *br;
 	u16 vid = 0;
 
+#ifdef CONFIG_TP_HYFI_BRIDGE
+	struct net_bridge_port *pdst = NULL;
+	br_get_dst_hook_t *get_dst_hook = rcu_dereference(br_get_dst_hook);
+#endif /*CONFIG_TP_HYFI_BRIDGE*/
+
 	if (!p || p->state == BR_STATE_DISABLED)
 		goto drop;
 
@@ -103,10 +116,14 @@ int br_handle_frame_finish(struct net *net, struct sock *sk, struct sk_buff *skb
 		}
 	}
 
+	BR_INPUT_SKB_CB(skb)->brdev = br->dev;
+
+	if (skb->protocol == htons(ETH_P_PAE) && !br->disable_eap_hack)
+		return br_pass_frame_up(skb);
+
 	if (p->state == BR_STATE_LEARNING)
 		goto drop;
 
-	BR_INPUT_SKB_CB(skb)->brdev = br->dev;
 	BR_INPUT_SKB_CB(skb)->src_port_isolated = !!(p->flags & BR_ISOLATED);
 
 	if (IS_ENABLED(CONFIG_INET) &&
@@ -143,7 +160,13 @@ int br_handle_frame_finish(struct net *net, struct sock *sk, struct sk_buff *skb
 		}
 		break;
 	case BR_PKT_UNICAST:
-		dst = br_fdb_find_rcu(br, eth_hdr(skb)->h_dest, vid);
+#ifdef CONFIG_TP_HYFI_BRIDGE
+		if ((pdst = __br_get(get_dst_hook, NULL, p, &skb))) {
+			if (!skb) goto out;
+		}
+		else
+#endif /*CONFIG_TP_HYFI_BRIDGE*/
+			dst = br_fdb_find_rcu(br, eth_hdr(skb)->h_dest, vid);
 	default:
 		break;
 	}
@@ -156,7 +179,14 @@ int br_handle_frame_finish(struct net *net, struct sock *sk, struct sk_buff *skb
 
 		if (now != dst->used)
 			dst->used = now;
+#ifdef CONFIG_TP_HYFI_BRIDGE
+		pdst = dst->dst;
+	}
+	if(pdst) {
+		br_forward(pdst, skb, local_rcv, false);
+#else
 		br_forward(dst->dst, skb, local_rcv, false);
+#endif
 	} else {
 		if (!mcast_hit)
 			br_flood(br, skb, pkt_type, local_rcv, false);
@@ -190,6 +220,9 @@ static void __br_handle_local_finish(struct sk_buff *skb)
 /* note: already called with rcu_read_lock */
 static int br_handle_local_finish(struct net *net, struct sock *sk, struct sk_buff *skb)
 {
+	struct net_bridge_port *p = br_port_get_rcu(skb->dev);
+
+	if (p->state != BR_STATE_DISABLED)
 	__br_handle_local_finish(skb);
 
 	/* return 1 to signal the okfn() was called so it's ok to use the skb */
@@ -249,6 +282,13 @@ frame_finish:
 	return RX_HANDLER_CONSUMED;
 }
 
+/* add by wanghao */
+#ifdef CONFIG_TP_IMAGE
+int (*blocking_recv)(struct sk_buff *skb) __rcu __read_mostly = NULL;
+EXPORT_SYMBOL_GPL(blocking_recv);
+#endif
+/* add end */
+
 /*
  * Return NULL if skb is handled
  * note: already called with rcu_read_lock
@@ -259,6 +299,10 @@ rx_handler_result_t br_handle_frame(struct sk_buff **pskb)
 	struct sk_buff *skb = *pskb;
 	const unsigned char *dest = eth_hdr(skb)->h_dest;
 
+#ifdef CONFIG_TP_IMAGE
+	int (*block_recv)(struct sk_buff *skb) = NULL;//add by wanghao
+#endif
+
 	if (unlikely(skb->pkt_type == PACKET_LOOPBACK))
 		return RX_HANDLER_PASS;
 
@@ -268,6 +312,18 @@ rx_handler_result_t br_handle_frame(struct sk_buff **pskb)
 	skb = skb_share_check(skb, GFP_ATOMIC);
 	if (!skb)
 		return RX_HANDLER_CONSUMED;
+
+	/* add by wanghao */
+#ifdef CONFIG_TP_IMAGE
+	block_recv = rcu_dereference(blocking_recv);
+	if (block_recv) {
+		if (block_recv(skb)) {
+			kfree_skb(skb);
+			return RX_HANDLER_CONSUMED;
+		}
+	}
+#endif
+	/* add end */
 
 	memset(skb->cb, 0, sizeof(struct br_input_skb_cb));
 
@@ -340,6 +396,17 @@ rx_handler_result_t br_handle_frame(struct sk_buff **pskb)
 
 forward:
 	switch (p->state) {
+	case BR_STATE_DISABLED:
+		if (ether_addr_equal(p->br->dev->dev_addr, dest))
+			skb->pkt_type = PACKET_HOST;
+
+		if (NF_HOOK(NFPROTO_BRIDGE, NF_BR_PRE_ROUTING,
+			dev_net(skb->dev), NULL, skb, skb->dev, NULL,
+			br_handle_local_finish) == 1) {
+			return RX_HANDLER_PASS;
+		}
+		break;
+
 	case BR_STATE_FORWARDING:
 	case BR_STATE_LEARNING:
 		if (ether_addr_equal(p->br->dev->dev_addr, dest))

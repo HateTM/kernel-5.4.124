@@ -83,6 +83,18 @@
 #include <linux/netlink.h>
 #include <linux/tcp.h>
 
+/* add by wanghao  */
+#ifdef CONFIG_TP_IMAGE
+#ifdef CONFIG_SFE_PPP_HEADER
+int (*sfe_ppp_L2tpParsePtr)(struct sk_buff *skb) __rcu __read_mostly;
+EXPORT_SYMBOL_GPL(sfe_ppp_L2tpParsePtr);
+#endif
+#ifdef CONFIG_NF_SHORTCUT_HOOK
+extern int (*smb_nf_local_out_hook)(struct sk_buff *skb);
+extern int (*smb_nf_post_routing_hook)(struct sk_buff *skb);
+#endif
+#endif /* CONFIG_TP_IMAGE */
+
 static int
 ip_fragment(struct net *net, struct sock *sk, struct sk_buff *skb,
 	    unsigned int mtu,
@@ -112,6 +124,11 @@ int __ip_local_out(struct net *net, struct sock *sk, struct sk_buff *skb)
 
 	skb->protocol = htons(ETH_P_IP);
 
+#if defined(CONFIG_TP_IMAGE) && defined(CONFIG_NF_SHORTCUT_HOOK)
+	if (smb_nf_local_out_hook && smb_nf_local_out_hook(skb))
+			return dst_output(net, sk, skb);
+	else
+#endif
 	return nf_hook(NFPROTO_IPV4, NF_INET_LOCAL_OUT,
 		       net, sk, skb, NULL, skb_dst(skb)->dev,
 		       dst_output);
@@ -177,7 +194,7 @@ int ip_build_and_send_pkt(struct sk_buff *skb, const struct sock *sk,
 	skb->priority = sk->sk_priority;
 	if (!skb->mark)
 		skb->mark = sk->sk_mark;
-
+	
 	/* Send it out. */
 	return ip_local_out(net, skb->sk, skb);
 }
@@ -429,7 +446,12 @@ int ip_output(struct net *net, struct sock *sk, struct sk_buff *skb)
 
 	skb->dev = dev;
 	skb->protocol = htons(ETH_P_IP);
-
+	
+#if defined(CONFIG_TP_IMAGE) && defined(CONFIG_NF_SHORTCUT_HOOK)
+	if (smb_nf_post_routing_hook && smb_nf_post_routing_hook(skb))
+			return ip_finish_output(net, sk, skb);
+	else
+#endif
 	return NF_HOOK_COND(NFPROTO_IPV4, NF_INET_POST_ROUTING,
 			    net, sk, skb, NULL, dev,
 			    ip_finish_output,
@@ -461,7 +483,10 @@ int __ip_queue_xmit(struct sock *sk, struct sk_buff *skb, struct flowi *fl,
 	struct rtable *rt;
 	struct iphdr *iph;
 	int res;
-
+#if (defined CONFIG_TP_IMAGE) && (defined CONFIG_SFE_PPP_HEADER)
+	int (*ppp_parse)(struct sk_buff *skb) = NULL;
+#endif
+	
 	/* Skip all of this if the packet is already routed,
 	 * f.e. by something like SCTP.
 	 */
@@ -529,6 +554,14 @@ packet_routed:
 	/* TODO : should we use skb->sk here instead of sk ? */
 	skb->priority = sk->sk_priority;
 	skb->mark = sk->sk_mark;
+
+	/* add by wanghao */
+#if (defined CONFIG_TP_IMAGE) && (defined CONFIG_SFE_PPP_HEADER)
+	ppp_parse = rcu_dereference(sfe_ppp_L2tpParsePtr);
+	if (ppp_parse) {
+		ppp_parse(skb);
+	}
+#endif
 
 	res = ip_local_out(net, sk, skb);
 	rcu_read_unlock();

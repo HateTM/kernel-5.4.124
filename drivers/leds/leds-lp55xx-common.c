@@ -474,6 +474,11 @@ int lp55xx_register_leds(struct lp55xx_led *led, struct lp55xx_chip *chip)
 			continue;
 
 		led_current = pdata->led_config[i].led_current;
+
+#if defined(CONFIG_TP_IMAGE)
+		//changed by zhangshengbo to set current to 0x16
+		led_current = 0x16;
+#endif 
 		each = led + i;
 		ret = lp55xx_init_led(each, chip, i);
 		if (ret)

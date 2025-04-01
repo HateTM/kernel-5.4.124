@@ -1348,6 +1348,17 @@ struct tty_struct *tty_init_dev(struct tty_driver *driver, int idx)
 			"%s: %s driver does not set tty->port. This will crash the kernel later. Fix the driver!\n",
 			__func__, tty->driver->name);
 
+/* add by wangzhanfeng 20221102, merge from mtk762x */
+#if defined(CONFIG_TP_IMAGE)
+	/* if tty->port is null,do not go further,otherwise it will casue kernel panic */
+	if (!tty->port){
+		retval=-ENODEV; /* it's nessesary ,or the retval=0 ;which means no error.the next code doesn't know it's bad arleady...*/
+		goto err_deinit_tty_cport_fail; /*driver need to release tty,or 2nd time the tty_open could be blocked!*/
+		}
+#endif
+/* add by wangzhanfeng end */
+
+
 	retval = tty_ldisc_lock(tty, 5 * HZ);
 	if (retval)
 		goto err_release_lock;
@@ -1381,6 +1392,18 @@ err_release_lock:
 	tty_unlock(tty);
 	release_tty(tty, idx);
 	return ERR_PTR(retval);
+
+/* add by wangzhanfeng 20221102, merge from mtk762x */
+#if defined(CONFIG_TP_IMAGE)
+err_deinit_tty_cport_fail:
+	tty_unlock(tty);
+	//deinitialize_tty_struct(tty);
+	tty_driver_remove_tty(tty->driver, tty);
+	free_tty_struct(tty);
+	module_put(driver->owner);
+	return ERR_PTR(retval);
+#endif
+/* add by wangzhanfeng end */
 }
 
 /**

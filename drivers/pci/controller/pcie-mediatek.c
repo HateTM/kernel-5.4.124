@@ -14,6 +14,7 @@
 #include <linux/irqchip/chained_irq.h>
 #include <linux/irqdomain.h>
 #include <linux/kernel.h>
+#include <linux/mfd/syscon.h>
 #include <linux/msi.h>
 #include <linux/module.h>
 #include <linux/of_address.h>
@@ -23,6 +24,7 @@
 #include <linux/phy/phy.h>
 #include <linux/platform_device.h>
 #include <linux/pm_runtime.h>
+#include <linux/regmap.h>
 #include <linux/reset.h>
 
 #include "../pci.h"
@@ -205,6 +207,7 @@ struct mtk_pcie_port {
  * struct mtk_pcie - PCIe host information
  * @dev: pointer to PCIe device
  * @base: IO mapped register base
+ * @cfg: IO mapped register map for PCIe config
  * @free_ck: free-run reference clock
  * @mem: non-prefetchable memory resource
  * @ports: pointer to PCIe port information
@@ -214,6 +217,7 @@ struct mtk_pcie_port {
 struct mtk_pcie {
 	struct device *dev;
 	void __iomem *base;
+	struct regmap *cfg;
 	struct clk *free_ck;
 
 	struct resource mem;
@@ -436,24 +440,24 @@ static int mtk_pcie_irq_domain_alloc(struct irq_domain *domain, unsigned int vir
 				     unsigned int nr_irqs, void *args)
 {
 	struct mtk_pcie_port *port = domain->host_data;
-	unsigned long bit;
+	int bit, i;
 
-	WARN_ON(nr_irqs != 1);
 	mutex_lock(&port->lock);
 
-	bit = find_first_zero_bit(port->msi_irq_in_use, MTK_MSI_IRQS_NUM);
-	if (bit >= MTK_MSI_IRQS_NUM) {
+	bit = bitmap_find_free_region(port->msi_irq_in_use, MTK_MSI_IRQS_NUM,
+							order_base_2(nr_irqs));
+	if (bit < 0) {
 		mutex_unlock(&port->lock);
 		return -ENOSPC;
 	}
 
-	__set_bit(bit, port->msi_irq_in_use);
-
 	mutex_unlock(&port->lock);
 
-	irq_domain_set_info(domain, virq, bit, &mtk_msi_bottom_irq_chip,
-			    domain->host_data, handle_edge_irq,
-			    NULL, NULL);
+	for (i = 0; i < nr_irqs; i++) {
+		irq_domain_set_info(domain, virq + i, bit + i,
+				    &mtk_msi_bottom_irq_chip, domain->host_data,
+				    handle_edge_irq, NULL, NULL);
+	}
 
 	return 0;
 }
@@ -491,7 +495,7 @@ static struct irq_chip mtk_msi_irq_chip = {
 
 static struct msi_domain_info mtk_msi_domain_info = {
 	.flags	= (MSI_FLAG_USE_DEF_DOM_OPS | MSI_FLAG_USE_DEF_CHIP_OPS |
-		   MSI_FLAG_PCI_MSIX),
+		   MSI_FLAG_PCI_MSIX | MSI_FLAG_MULTI_PCI_MSI),
 	.chip	= &mtk_msi_irq_chip,
 };
 
@@ -612,10 +616,10 @@ static void mtk_pcie_intr_handler(struct irq_desc *desc)
 	if (status & INTX_MASK) {
 		for_each_set_bit_from(bit, &status, PCI_NUM_INTX + INTX_SHIFT) {
 			/* Clear the INTx */
-			writel(1 << bit, port->base + PCIE_INT_STATUS);
 			virq = irq_find_mapping(port->irq_domain,
 						bit - INTX_SHIFT);
 			generic_handle_irq(virq);
+			writel(1 << bit, port->base + PCIE_INT_STATUS);
 		}
 	}
 
@@ -623,14 +627,14 @@ static void mtk_pcie_intr_handler(struct irq_desc *desc)
 		if (status & MSI_STATUS){
 			unsigned long imsi_status;
 
+			/* Clear MSI interrupt status */
+			writel(MSI_STATUS, port->base + PCIE_INT_STATUS);
 			while ((imsi_status = readl(port->base + PCIE_IMSI_STATUS))) {
 				for_each_set_bit(bit, &imsi_status, MTK_MSI_IRQS_NUM) {
 					virq = irq_find_mapping(port->inner_domain, bit);
 					generic_handle_irq(virq);
 				}
 			}
-			/* Clear MSI interrupt status */
-			writel(MSI_STATUS, port->base + PCIE_INT_STATUS);
 		}
 	}
 
@@ -651,7 +655,7 @@ static int mtk_pcie_setup_irq(struct mtk_pcie_port *port,
 		return err;
 	}
 
-	port->irq = platform_get_irq(pdev, port->slot);
+	port->irq = platform_get_irq_byname(pdev, "pcie_irq");
 	irq_set_chained_handler_and_data(port->irq,
 					 mtk_pcie_intr_handler, port);
 
@@ -666,12 +670,11 @@ static int mtk_pcie_startup_port_v2(struct mtk_pcie_port *port)
 	u32 val;
 	int err;
 
-	/* MT7622 platforms need to enable LTSSM and ASPM from PCIe subsys */
-	if (pcie->base) {
-		val = readl(pcie->base + PCIE_SYS_CFG_V2);
-		val |= PCIE_CSR_LTSSM_EN(port->slot) |
-		       PCIE_CSR_ASPM_L1_EN(port->slot);
-		writel(val, pcie->base + PCIE_SYS_CFG_V2);
+	/* MT7622/MT7629 platforms need to enable LTSSM and ASPM. */
+	if (pcie->cfg) {
+		val = PCIE_CSR_LTSSM_EN(port->slot) |
+		      PCIE_CSR_ASPM_L1_EN(port->slot);
+		regmap_update_bits(pcie->cfg, PCIE_SYS_CFG_V2, val, val);
 	}
 
 	/* Assert all reset signals */
@@ -977,6 +980,7 @@ static int mtk_pcie_subsys_powerup(struct mtk_pcie *pcie)
 	struct device *dev = pcie->dev;
 	struct platform_device *pdev = to_platform_device(dev);
 	struct resource *regs;
+	struct device_node *cfg_node;
 	int err;
 
 	/* get shared registers, which are optional */
@@ -987,6 +991,13 @@ static int mtk_pcie_subsys_powerup(struct mtk_pcie *pcie)
 			dev_err(dev, "failed to map shared register\n");
 			return PTR_ERR(pcie->base);
 		}
+	}
+
+	cfg_node = of_parse_phandle(dev->of_node, "mediatek,pcie-cfg", 0);
+	if (cfg_node) {
+		pcie->cfg = syscon_node_to_regmap(cfg_node);
+		if (IS_ERR(pcie->cfg))
+			return PTR_ERR(pcie->cfg);
 	}
 
 	pcie->free_ck = devm_clk_get(dev, "free_ck");

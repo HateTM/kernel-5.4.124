@@ -80,6 +80,7 @@
 #include <net/bonding.h>
 #include <net/bond_3ad.h>
 #include <net/bond_alb.h>
+#include <net/dsa.h>
 
 #include "bonding_priv.h"
 
@@ -1806,6 +1807,23 @@ int bond_enslave(struct net_device *bond_dev, struct net_device *slave_dev,
 	if (bond_mode_can_use_xmit_hash(bond))
 		bond_update_slave_arr(bond, NULL);
 
+#if defined(CONFIG_TP_IMAGE) && defined(CONFIG_NET_DSA_MT7530)
+	/* WARNING:
+	 *  MT753X DSA驱动和bond配合有问题。
+	 *  LAN2/LAN3作为聚合口，不属于br-lan，因此DSA驱动关闭了LAN2/LAN3的硬件转发
+	 *  而MT753X的SA MAC学习，判断优先级比硬件转发表高，导致硬件尝试转发报文而被拒绝。致使通信异常。
+	 *  修改此问题，正确做法应是关闭SA MAC学习。使得报文全部走软件处理，使bond功能生效。
+	 *  然而，实测MT7986纯软件转发的性能很差。链路聚合口只能跑到1G略微多数十M。
+	 *  因此，对于该问题按照下面方式修改：
+	 *  强制开启MT7531的硬件转发
+	 *  此修改遗留以下问题：
+	 *  1. 和iptv不兼容（由于平台功能设计，无影响）
+	 *  2. 报文走硬件转发，链路聚合部分功能存在异常。如static lag模式，我们路由器的聚合口，一个工作于active模式，一个为backup模式
+	 *     正常逻辑应为，backup口不接收、不转发报文。
+	 *     由于开启了硬件转发，backup口不接收但会转发报文。
+	 */
+	dsa_slave_join_bond_bridge(slave_dev);
+#endif
 
 	slave_info(bond_dev, slave_dev, "Enslaving as %s interface with %s link\n",
 		   bond_is_active_slave(new_slave) ? "an active" : "a backup",

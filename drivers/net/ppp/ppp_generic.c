@@ -53,6 +53,11 @@
 #include <net/net_namespace.h>
 #include <net/netns/generic.h>
 
+#if IS_ENABLED(CONFIG_NF_FLOW_TABLE)
+#include <linux/netfilter.h>
+#include <net/netfilter/nf_flow_table.h>
+#endif
+
 #define PPP_VERSION	"2.4.2"
 
 /*
@@ -1362,12 +1367,37 @@ static void ppp_dev_priv_destructor(struct net_device *dev)
 		ppp_destroy_interface(ppp);
 }
 
+#if IS_ENABLED(CONFIG_NF_FLOW_TABLE)
+static int ppp_flow_offload_check(struct flow_offload_hw_path *path)
+{
+	struct ppp *ppp = netdev_priv(path->dev);
+	struct ppp_channel *chan;
+	struct channel *pch;
+
+	if (ppp->flags & SC_MULTILINK)
+		return -EOPNOTSUPP;
+
+	if (list_empty(&ppp->channels))
+		return -ENODEV;
+
+	pch = list_first_entry(&ppp->channels, struct channel, clist);
+	chan = pch->chan;
+	if (!chan->ops->flow_offload_check)
+		return -EOPNOTSUPP;
+
+	return chan->ops->flow_offload_check(chan, path);
+}
+#endif /* CONFIG_NF_FLOW_TABLE */
+
 static const struct net_device_ops ppp_netdev_ops = {
 	.ndo_init	 = ppp_dev_init,
 	.ndo_uninit      = ppp_dev_uninit,
 	.ndo_start_xmit  = ppp_start_xmit,
 	.ndo_do_ioctl    = ppp_net_ioctl,
 	.ndo_get_stats64 = ppp_get_stats64,
+#if IS_ENABLED(CONFIG_NF_FLOW_TABLE)
+	.ndo_flow_offload_check = ppp_flow_offload_check,
+#endif
 };
 
 static struct device_type ppp_type = {
@@ -2023,7 +2053,12 @@ ppp_input(struct ppp_channel *chan, struct sk_buff *skb)
 	}
 
 	proto = PPP_PROTO(skb);
-	if (!pch->ppp || proto >= 0xc000 || proto == PPP_CCPFRAG) {
+#ifdef CONFIG_TP_IMAGE
+#define TP_PPP_PADT 0x11a7
+		if (!pch->ppp || proto >= 0xc000 || proto == PPP_CCPFRAG || proto == TP_PPP_PADT) {
+#else
+		if (!pch->ppp || proto >= 0xc000 || proto == PPP_CCPFRAG) {
+#endif
 		/* put it on the channel queue */
 		skb_queue_tail(&pch->file.rq, skb);
 		/* drop old frames if queue too long */
@@ -2105,7 +2140,15 @@ ppp_receive_nonmp_frame(struct ppp *ppp, struct sk_buff *skb)
 	 */
 	if (ppp->rc_state && (ppp->rstate & SC_DECOMP_RUN) &&
 	    (ppp->rstate & (SC_DC_FERROR | SC_DC_ERROR)) == 0)
+	{
 		skb = ppp_decompress_frame(ppp, skb);
+#ifdef CONFIG_TP_IMAGE
+		/* add by wanghao  */
+		if (!skb)
+			goto err;
+		/* add end  */
+#endif /*CONFIG_TP_IMAGE*/		
+	}
 
 	if (ppp->flags & SC_MUST_COMP && ppp->rstate & SC_DC_FERROR)
 		goto err;
@@ -2223,7 +2266,14 @@ ppp_receive_nonmp_frame(struct ppp *ppp, struct sk_buff *skb)
 			skb_pull_rcsum(skb, 2);
 			skb->dev = ppp->dev;
 			skb->protocol = htons(npindex_to_ethertype[npi]);
-			skb_reset_mac_header(skb);
+#ifdef CONFIG_TP_IMAGE
+			/* if skb_mac_header was already set(as pppoe client), skb->data is pointed to ipv4 header,
+			   (skb->data - skb->header) is offset of ipv4 header not ethernet header */
+			if (!skb_mac_header_was_set(skb))
+#endif
+			{
+				skb_reset_mac_header(skb);
+			}
 			skb_scrub_packet(skb, !net_eq(ppp->ppp_net,
 						      dev_net(ppp->dev)));
 			netif_rx(skb);
@@ -2276,6 +2326,15 @@ ppp_decompress_frame(struct ppp *ppp, struct sk_buff *skb)
 			if (len == DECOMP_FATALERROR)
 				ppp->rstate |= SC_DC_FERROR;
 			kfree_skb(ns);
+#ifdef CONFIG_TP_IMAGE
+			/* add by wanghao  */
+			if (len == DECOMP_DROP_PKT) {
+				kfree_skb(skb);
+				return NULL;
+			}
+			/* add end	*/
+#endif /*CONFIG_TP_IMAGE*/
+
 			goto err;
 		}
 

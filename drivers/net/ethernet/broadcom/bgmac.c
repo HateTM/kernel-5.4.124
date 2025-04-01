@@ -12,7 +12,8 @@
 #include <linux/bcma/bcma.h>
 #include <linux/etherdevice.h>
 #include <linux/interrupt.h>
-#include <linux/bcm47xx_nvram.h>
+#include <linux/platform_data/b53.h>
+#include <linux/bcm47xx_.h>
 #include <linux/phy.h>
 #include <linux/phy_fixed.h>
 #include <net/dsa.h>
@@ -945,7 +946,7 @@ static void bgmac_chip_reset(struct bgmac *bgmac)
 			     BGMAC_CHIPCTL_1_IF_TYPE_MII;
 		char buf[4];
 
-		if (bcm47xx_nvram_getenv("et_swtype", buf, sizeof(buf)) > 0) {
+		if (bcm47xx__getenv("et_swtype", buf, sizeof(buf)) > 0) {
 			if (kstrtou8(buf, 0, &et_swtype))
 				dev_err(bgmac->dev, "Failed to parse et_swtype (%s)\n",
 					buf);
@@ -968,7 +969,7 @@ static void bgmac_chip_reset(struct bgmac *bgmac)
 		u8 et_swtype = 0;
 		char buf[4];
 
-		if (bcm47xx_nvram_getenv("et_swtype", buf, sizeof(buf)) > 0) {
+		if (bcm47xx__getenv("et_swtype", buf, sizeof(buf)) > 0) {
 			if (kstrtou8(buf, 0, &et_swtype))
 				dev_err(bgmac->dev, "Failed to parse et_swtype (%s)\n",
 					buf);
@@ -1407,6 +1408,17 @@ static const struct ethtool_ops bgmac_ethtool_ops = {
 	.set_link_ksettings     = phy_ethtool_set_link_ksettings,
 };
 
+static struct b53_platform_data bgmac_b53_pdata = {
+};
+
+static struct platform_device bgmac_b53_dev = {
+	.name		= "b53-srab-switch",
+	.id		= -1,
+	.dev		= {
+		.platform_data = &bgmac_b53_pdata,
+	},
+};
+
 /**************************************************
  * MII
  **************************************************/
@@ -1523,7 +1535,7 @@ int bgmac_enet_probe(struct bgmac *bgmac)
 	}
 
 	bgmac->int_mask = BGMAC_IS_ERRMASK | BGMAC_IS_RX | BGMAC_IS_TX_MASK;
-	if (bcm47xx_nvram_getenv("et0_no_txint", NULL, 0) == 0)
+	if (bcm47xx__getenv("et0_no_txint", NULL, 0) == 0)
 		bgmac->int_mask &= ~BGMAC_IS_TX_MASK;
 
 	netif_napi_add(net_dev, &bgmac->napi, bgmac_poll, BGMAC_WEIGHT);
@@ -1537,6 +1549,14 @@ int bgmac_enet_probe(struct bgmac *bgmac)
 	net_dev->features = NETIF_F_SG | NETIF_F_IP_CSUM | NETIF_F_IPV6_CSUM;
 	net_dev->hw_features = net_dev->features;
 	net_dev->vlan_features = net_dev->features;
+
+	if ((bgmac->feature_flags & BGMAC_FEAT_SRAB) && !bgmac_b53_pdata.regs) {
+		bgmac_b53_pdata.regs = ioremap_nocache(0x18007000, 0x1000);
+
+		err = platform_device_register(&bgmac_b53_dev);
+		if (!err)
+			bgmac->b53_device = &bgmac_b53_dev;
+	}
 
 	err = register_netdev(bgmac->net_dev);
 	if (err) {
@@ -1560,6 +1580,10 @@ EXPORT_SYMBOL_GPL(bgmac_enet_probe);
 
 void bgmac_enet_remove(struct bgmac *bgmac)
 {
+	if (bgmac->b53_device)
+		platform_device_unregister(&bgmac_b53_dev);
+	bgmac->b53_device = NULL;
+
 	unregister_netdev(bgmac->net_dev);
 	phy_disconnect(bgmac->net_dev->phydev);
 	netif_napi_del(&bgmac->napi);

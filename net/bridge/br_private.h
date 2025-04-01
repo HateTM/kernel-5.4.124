@@ -19,6 +19,10 @@
 #include <linux/rhashtable.h>
 #include <linux/refcount.h>
 
+#ifdef  CONFIG_TP_HYFI_BRIDGE
+#include <linux/export.h>
+#endif /* CONFIG_TP_HYFI_BRIDGE */
+
 #define BR_HASH_BITS 8
 #define BR_HASH_SIZE (1 << BR_HASH_BITS)
 
@@ -278,12 +282,21 @@ struct net_bridge_port {
 #endif
 	u16				group_fwd_mask;
 	u16				backup_redirected_cnt;
+	
+#if defined(CONFIG_TP_IMAGE) && defined(CONFIG_BRIDGE_VLAN_TP)
+		int vlan_id;
+#endif
 };
 
 #define kobj_to_brport(obj)	container_of(obj, struct net_bridge_port, kobj)
 
 #define br_auto_port(p) ((p)->flags & BR_AUTO_MASK)
 #define br_promisc_port(p) ((p)->flags & BR_PROMISC)
+
+#if defined(CONFIG_TP_IMAGE) && defined(CONFIG_BRIDGE_VLAN_TP)
+#define br_port_get(dev) ((struct net_bridge_port *) dev->rx_handler_data)
+#define br_port_exists(dev) (dev->priv_flags & IFF_BRIDGE_PORT)
+#endif
 
 static inline struct net_bridge_port *br_port_get_rcu(const struct net_device *dev)
 {
@@ -344,6 +357,8 @@ struct net_bridge {
 #endif
 	u16				group_fwd_mask;
 	u16				group_fwd_mask_required;
+
+	bool				disable_eap_hack;
 
 	/* STP */
 	bridge_id			designated_root;
@@ -416,6 +431,11 @@ struct net_bridge {
 #ifdef CONFIG_NET_SWITCHDEV
 	int offload_fwd_mark;
 #endif
+
+#ifdef CONFIG_TP_IMAGE
+	int offlearning_port_count;
+#endif
+
 	struct hlist_head		fdb_list;
 };
 
@@ -1159,7 +1179,7 @@ void br_stp_port_timer_init(struct net_bridge_port *p);
 unsigned long br_timer_value(const struct timer_list *timer);
 
 /* br.c */
-#if IS_ENABLED(CONFIG_ATM_LANE)
+#if IS_ENABLED(CONFIG_ATM_LANE) || (defined CONFIG_X_TP_VLAN)
 extern int (*br_fdb_test_addr_hook)(struct net_device *dev, unsigned char *addr);
 #endif
 
@@ -1203,8 +1223,8 @@ bool nbp_switchdev_allowed_egress(const struct net_bridge_port *p,
 int br_switchdev_set_port_flag(struct net_bridge_port *p,
 			       unsigned long flags,
 			       unsigned long mask);
-void br_switchdev_fdb_notify(const struct net_bridge_fdb_entry *fdb,
-			     int type);
+void br_switchdev_fdb_notify(struct net_bridge *br,
+			     const struct net_bridge_fdb_entry *fdb, int type);
 int br_switchdev_port_vlan_add(struct net_device *dev, u16 vid, u16 flags,
 			       struct netlink_ext_ack *extack);
 int br_switchdev_port_vlan_del(struct net_device *dev, u16 vid);
@@ -1250,7 +1270,8 @@ static inline int br_switchdev_port_vlan_del(struct net_device *dev, u16 vid)
 }
 
 static inline void
-br_switchdev_fdb_notify(const struct net_bridge_fdb_entry *fdb, int type)
+br_switchdev_fdb_notify(struct net_bridge *br,
+			const struct net_bridge_fdb_entry *fdb, int type)
 {
 }
 
@@ -1266,4 +1287,18 @@ void br_do_proxy_suppress_arp(struct sk_buff *skb, struct net_bridge *br,
 void br_do_suppress_nd(struct sk_buff *skb, struct net_bridge *br,
 		       u16 vid, struct net_bridge_port *p, struct nd_msg *msg);
 struct nd_msg *br_is_nd_neigh_msg(struct sk_buff *skb, struct nd_msg *m);
+
+#if defined(CONFIG_TP_IMAGE) || defined(CONFIG_TP_HYFI_BRIDGE)
+#define __br_get(__hook, __default, __args ...) \
+		(__hook ? (__hook(__args)) : (__default))
+
+static inline void __br_notify(int group, int type, const void *data)
+{
+	br_notify_hook_t *notify_hook = rcu_dereference(br_notify_hook);
+
+	if (notify_hook)
+		notify_hook(group, type, data);
+}
+#endif
+
 #endif

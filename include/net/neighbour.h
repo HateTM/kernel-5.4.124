@@ -153,6 +153,9 @@ struct neighbour {
 	unsigned char		ha[ALIGN(MAX_ADDR_LEN, sizeof(unsigned long))] __aligned(8);
 	struct hh_cache		hh;
 	int			(*output)(struct neighbour *, struct sk_buff *);
+#ifdef CONFIG_TP_IMAGE
+		struct timeval		time_record; /* Record the time of GARP send */
+#endif /*CONFIG_TP_IMAGE*/
 	const struct neigh_ops	*ops;
 	struct list_head	gc_list;
 	struct rcu_head		rcu;
@@ -311,6 +314,7 @@ static inline struct neighbour *__neigh_lookup_noref(struct neigh_table *tbl,
 
 void neigh_table_init(int index, struct neigh_table *tbl);
 int neigh_table_clear(int index, struct neigh_table *tbl);
+struct neigh_table *neigh_get_table(int family);
 struct neighbour *neigh_lookup(struct neigh_table *tbl, const void *pkey,
 			       struct net_device *dev);
 struct neighbour *neigh_lookup_nodev(struct neigh_table *tbl, struct net *net,

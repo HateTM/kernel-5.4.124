@@ -52,6 +52,11 @@
 #include <net/net_namespace.h>
 #include <net/netns/generic.h>
 
+#if IS_ENABLED(CONFIG_NF_FLOW_TABLE)
+#include <linux/netfilter.h>
+#include <net/netfilter/nf_flow_table.h>
+#endif
+
 /*
    This version of net/ipv6/sit.c is cloned of net/ipv4/ip_gre.c
 
@@ -1342,6 +1347,22 @@ done:
 	return err;
 }
 
+#if IS_ENABLED(CONFIG_NF_FLOW_TABLE)
+static int ipip6_dev_flow_offload_check(struct flow_offload_hw_path *path)
+{
+	struct net_device *dev = path->dev;
+	struct ip_tunnel *tnl = netdev_priv(dev);
+
+	if (path->flags & FLOW_OFFLOAD_PATH_6RD)
+		return -EEXIST;
+
+	path->flags |= FLOW_OFFLOAD_PATH_6RD;
+	path->dev = tnl->dev;
+
+	return 0;
+}
+#endif /* CONFIG_NF_FLOW_TABLE */
+
 static const struct net_device_ops ipip6_netdev_ops = {
 	.ndo_init	= ipip6_tunnel_init,
 	.ndo_uninit	= ipip6_tunnel_uninit,
@@ -1349,6 +1370,9 @@ static const struct net_device_ops ipip6_netdev_ops = {
 	.ndo_do_ioctl	= ipip6_tunnel_ioctl,
 	.ndo_get_stats64 = ip_tunnel_get_stats64,
 	.ndo_get_iflink = ip_tunnel_get_iflink,
+#if IS_ENABLED(CONFIG_NF_FLOW_TABLE)
+	.ndo_flow_offload_check = ipip6_dev_flow_offload_check,
+#endif
 };
 
 static void ipip6_dev_free(struct net_device *dev)

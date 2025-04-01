@@ -4099,14 +4099,14 @@ bnx2_set_power_state(struct bnx2 *bp, pci_power_t state)
 }
 
 static int
-bnx2_acquire_nvram_lock(struct bnx2 *bp)
+bnx2_acquire__lock(struct bnx2 *bp)
 {
 	u32 val;
 	int j;
 
 	/* Request access to the flash interface. */
 	BNX2_WR(bp, BNX2_NVM_SW_ARB, BNX2_NVM_SW_ARB_ARB_REQ_SET2);
-	for (j = 0; j < NVRAM_TIMEOUT_COUNT; j++) {
+	for (j = 0; j < _TIMEOUT_COUNT; j++) {
 		val = BNX2_RD(bp, BNX2_NVM_SW_ARB);
 		if (val & BNX2_NVM_SW_ARB_ARB_ARB2)
 			break;
@@ -4114,22 +4114,22 @@ bnx2_acquire_nvram_lock(struct bnx2 *bp)
 		udelay(5);
 	}
 
-	if (j >= NVRAM_TIMEOUT_COUNT)
+	if (j >= _TIMEOUT_COUNT)
 		return -EBUSY;
 
 	return 0;
 }
 
 static int
-bnx2_release_nvram_lock(struct bnx2 *bp)
+bnx2_release__lock(struct bnx2 *bp)
 {
 	int j;
 	u32 val;
 
-	/* Relinquish nvram interface. */
+	/* Relinquish  interface. */
 	BNX2_WR(bp, BNX2_NVM_SW_ARB, BNX2_NVM_SW_ARB_ARB_REQ_CLR2);
 
-	for (j = 0; j < NVRAM_TIMEOUT_COUNT; j++) {
+	for (j = 0; j < _TIMEOUT_COUNT; j++) {
 		val = BNX2_RD(bp, BNX2_NVM_SW_ARB);
 		if (!(val & BNX2_NVM_SW_ARB_ARB_ARB2))
 			break;
@@ -4137,7 +4137,7 @@ bnx2_release_nvram_lock(struct bnx2 *bp)
 		udelay(5);
 	}
 
-	if (j >= NVRAM_TIMEOUT_COUNT)
+	if (j >= _TIMEOUT_COUNT)
 		return -EBUSY;
 
 	return 0;
@@ -4145,7 +4145,7 @@ bnx2_release_nvram_lock(struct bnx2 *bp)
 
 
 static int
-bnx2_enable_nvram_write(struct bnx2 *bp)
+bnx2_enable__write(struct bnx2 *bp)
 {
 	u32 val;
 
@@ -4159,7 +4159,7 @@ bnx2_enable_nvram_write(struct bnx2 *bp)
 		BNX2_WR(bp, BNX2_NVM_COMMAND,
 			BNX2_NVM_COMMAND_WREN | BNX2_NVM_COMMAND_DOIT);
 
-		for (j = 0; j < NVRAM_TIMEOUT_COUNT; j++) {
+		for (j = 0; j < _TIMEOUT_COUNT; j++) {
 			udelay(5);
 
 			val = BNX2_RD(bp, BNX2_NVM_COMMAND);
@@ -4167,14 +4167,14 @@ bnx2_enable_nvram_write(struct bnx2 *bp)
 				break;
 		}
 
-		if (j >= NVRAM_TIMEOUT_COUNT)
+		if (j >= _TIMEOUT_COUNT)
 			return -EBUSY;
 	}
 	return 0;
 }
 
 static void
-bnx2_disable_nvram_write(struct bnx2 *bp)
+bnx2_disable__write(struct bnx2 *bp)
 {
 	u32 val;
 
@@ -4184,7 +4184,7 @@ bnx2_disable_nvram_write(struct bnx2 *bp)
 
 
 static void
-bnx2_enable_nvram_access(struct bnx2 *bp)
+bnx2_enable__access(struct bnx2 *bp)
 {
 	u32 val;
 
@@ -4195,7 +4195,7 @@ bnx2_enable_nvram_access(struct bnx2 *bp)
 }
 
 static void
-bnx2_disable_nvram_access(struct bnx2 *bp)
+bnx2_disable__access(struct bnx2 *bp)
 {
 	u32 val;
 
@@ -4207,7 +4207,7 @@ bnx2_disable_nvram_access(struct bnx2 *bp)
 }
 
 static int
-bnx2_nvram_erase_page(struct bnx2 *bp, u32 offset)
+bnx2__erase_page(struct bnx2 *bp, u32 offset)
 {
 	u32 cmd;
 	int j;
@@ -4223,14 +4223,14 @@ bnx2_nvram_erase_page(struct bnx2 *bp, u32 offset)
 	/* Need to clear DONE bit separately. */
 	BNX2_WR(bp, BNX2_NVM_COMMAND, BNX2_NVM_COMMAND_DONE);
 
-	/* Address of the NVRAM to read from. */
+	/* Address of the  to read from. */
 	BNX2_WR(bp, BNX2_NVM_ADDR, offset & BNX2_NVM_ADDR_NVM_ADDR_VALUE);
 
 	/* Issue an erase command. */
 	BNX2_WR(bp, BNX2_NVM_COMMAND, cmd);
 
 	/* Wait for completion. */
-	for (j = 0; j < NVRAM_TIMEOUT_COUNT; j++) {
+	for (j = 0; j < _TIMEOUT_COUNT; j++) {
 		u32 val;
 
 		udelay(5);
@@ -4240,14 +4240,14 @@ bnx2_nvram_erase_page(struct bnx2 *bp, u32 offset)
 			break;
 	}
 
-	if (j >= NVRAM_TIMEOUT_COUNT)
+	if (j >= _TIMEOUT_COUNT)
 		return -EBUSY;
 
 	return 0;
 }
 
 static int
-bnx2_nvram_read_dword(struct bnx2 *bp, u32 offset, u8 *ret_val, u32 cmd_flags)
+bnx2__read_dword(struct bnx2 *bp, u32 offset, u8 *ret_val, u32 cmd_flags)
 {
 	u32 cmd;
 	int j;
@@ -4265,14 +4265,14 @@ bnx2_nvram_read_dword(struct bnx2 *bp, u32 offset, u8 *ret_val, u32 cmd_flags)
 	/* Need to clear DONE bit separately. */
 	BNX2_WR(bp, BNX2_NVM_COMMAND, BNX2_NVM_COMMAND_DONE);
 
-	/* Address of the NVRAM to read from. */
+	/* Address of the  to read from. */
 	BNX2_WR(bp, BNX2_NVM_ADDR, offset & BNX2_NVM_ADDR_NVM_ADDR_VALUE);
 
 	/* Issue a read command. */
 	BNX2_WR(bp, BNX2_NVM_COMMAND, cmd);
 
 	/* Wait for completion. */
-	for (j = 0; j < NVRAM_TIMEOUT_COUNT; j++) {
+	for (j = 0; j < _TIMEOUT_COUNT; j++) {
 		u32 val;
 
 		udelay(5);
@@ -4284,7 +4284,7 @@ bnx2_nvram_read_dword(struct bnx2 *bp, u32 offset, u8 *ret_val, u32 cmd_flags)
 			break;
 		}
 	}
-	if (j >= NVRAM_TIMEOUT_COUNT)
+	if (j >= _TIMEOUT_COUNT)
 		return -EBUSY;
 
 	return 0;
@@ -4292,7 +4292,7 @@ bnx2_nvram_read_dword(struct bnx2 *bp, u32 offset, u8 *ret_val, u32 cmd_flags)
 
 
 static int
-bnx2_nvram_write_dword(struct bnx2 *bp, u32 offset, u8 *val, u32 cmd_flags)
+bnx2__write_dword(struct bnx2 *bp, u32 offset, u8 *val, u32 cmd_flags)
 {
 	u32 cmd;
 	__be32 val32;
@@ -4316,27 +4316,27 @@ bnx2_nvram_write_dword(struct bnx2 *bp, u32 offset, u8 *val, u32 cmd_flags)
 	/* Write the data. */
 	BNX2_WR(bp, BNX2_NVM_WRITE, be32_to_cpu(val32));
 
-	/* Address of the NVRAM to write to. */
+	/* Address of the  to write to. */
 	BNX2_WR(bp, BNX2_NVM_ADDR, offset & BNX2_NVM_ADDR_NVM_ADDR_VALUE);
 
 	/* Issue the write command. */
 	BNX2_WR(bp, BNX2_NVM_COMMAND, cmd);
 
 	/* Wait for completion. */
-	for (j = 0; j < NVRAM_TIMEOUT_COUNT; j++) {
+	for (j = 0; j < _TIMEOUT_COUNT; j++) {
 		udelay(5);
 
 		if (BNX2_RD(bp, BNX2_NVM_COMMAND) & BNX2_NVM_COMMAND_DONE)
 			break;
 	}
-	if (j >= NVRAM_TIMEOUT_COUNT)
+	if (j >= _TIMEOUT_COUNT)
 		return -EBUSY;
 
 	return 0;
 }
 
 static int
-bnx2_init_nvram(struct bnx2 *bp)
+bnx2_init_(struct bnx2 *bp)
 {
 	u32 val;
 	int j, entry_count, rc = 0;
@@ -4380,11 +4380,11 @@ bnx2_init_nvram(struct bnx2 *bp)
 				bp->flash_info = flash;
 
 				/* Request access to the flash interface. */
-				if ((rc = bnx2_acquire_nvram_lock(bp)) != 0)
+				if ((rc = bnx2_acquire__lock(bp)) != 0)
 					return rc;
 
 				/* Enable access to flash interface */
-				bnx2_enable_nvram_access(bp);
+				bnx2_enable__access(bp);
 
 				/* Reconfigure the flash interface */
 				BNX2_WR(bp, BNX2_NVM_CFG1, flash->config1);
@@ -4393,8 +4393,8 @@ bnx2_init_nvram(struct bnx2 *bp)
 				BNX2_WR(bp, BNX2_NVM_WRITE1, flash->write1);
 
 				/* Disable access to flash interface */
-				bnx2_disable_nvram_access(bp);
-				bnx2_release_nvram_lock(bp);
+				bnx2_disable__access(bp);
+				bnx2_release__lock(bp);
 
 				break;
 			}
@@ -4419,7 +4419,7 @@ get_flash_size:
 }
 
 static int
-bnx2_nvram_read(struct bnx2 *bp, u32 offset, u8 *ret_buf,
+bnx2__read(struct bnx2 *bp, u32 offset, u8 *ret_buf,
 		int buf_size)
 {
 	int rc = 0;
@@ -4429,11 +4429,11 @@ bnx2_nvram_read(struct bnx2 *bp, u32 offset, u8 *ret_buf,
 		return 0;
 
 	/* Request access to the flash interface. */
-	if ((rc = bnx2_acquire_nvram_lock(bp)) != 0)
+	if ((rc = bnx2_acquire__lock(bp)) != 0)
 		return rc;
 
 	/* Enable access to flash interface */
-	bnx2_enable_nvram_access(bp);
+	bnx2_enable__access(bp);
 
 	len32 = buf_size;
 	offset32 = offset;
@@ -4457,7 +4457,7 @@ bnx2_nvram_read(struct bnx2 *bp, u32 offset, u8 *ret_buf,
 			cmd_flags = BNX2_NVM_COMMAND_FIRST;
 		}
 
-		rc = bnx2_nvram_read_dword(bp, offset32, buf, cmd_flags);
+		rc = bnx2__read_dword(bp, offset32, buf, cmd_flags);
 
 		if (rc)
 			return rc;
@@ -4482,7 +4482,7 @@ bnx2_nvram_read(struct bnx2 *bp, u32 offset, u8 *ret_buf,
 			cmd_flags = BNX2_NVM_COMMAND_FIRST |
 				    BNX2_NVM_COMMAND_LAST;
 
-		rc = bnx2_nvram_read_dword(bp, offset32, buf, cmd_flags);
+		rc = bnx2__read_dword(bp, offset32, buf, cmd_flags);
 
 		memcpy(ret_buf, buf, 4 - extra);
 	}
@@ -4495,7 +4495,7 @@ bnx2_nvram_read(struct bnx2 *bp, u32 offset, u8 *ret_buf,
 		else
 			cmd_flags = BNX2_NVM_COMMAND_FIRST;
 
-		rc = bnx2_nvram_read_dword(bp, offset32, ret_buf, cmd_flags);
+		rc = bnx2__read_dword(bp, offset32, ret_buf, cmd_flags);
 
 		/* Advance to the next dword. */
 		offset32 += 4;
@@ -4503,7 +4503,7 @@ bnx2_nvram_read(struct bnx2 *bp, u32 offset, u8 *ret_buf,
 		len32 -= 4;
 
 		while (len32 > 4 && rc == 0) {
-			rc = bnx2_nvram_read_dword(bp, offset32, ret_buf, 0);
+			rc = bnx2__read_dword(bp, offset32, ret_buf, 0);
 
 			/* Advance to the next dword. */
 			offset32 += 4;
@@ -4515,21 +4515,21 @@ bnx2_nvram_read(struct bnx2 *bp, u32 offset, u8 *ret_buf,
 			return rc;
 
 		cmd_flags = BNX2_NVM_COMMAND_LAST;
-		rc = bnx2_nvram_read_dword(bp, offset32, buf, cmd_flags);
+		rc = bnx2__read_dword(bp, offset32, buf, cmd_flags);
 
 		memcpy(ret_buf, buf, 4 - extra);
 	}
 
 	/* Disable access to flash interface */
-	bnx2_disable_nvram_access(bp);
+	bnx2_disable__access(bp);
 
-	bnx2_release_nvram_lock(bp);
+	bnx2_release__lock(bp);
 
 	return rc;
 }
 
 static int
-bnx2_nvram_write(struct bnx2 *bp, u32 offset, u8 *data_buf,
+bnx2__write(struct bnx2 *bp, u32 offset, u8 *data_buf,
 		int buf_size)
 {
 	u32 written, offset32, len32;
@@ -4547,14 +4547,14 @@ bnx2_nvram_write(struct bnx2 *bp, u32 offset, u8 *data_buf,
 		len32 += align_start;
 		if (len32 < 4)
 			len32 = 4;
-		if ((rc = bnx2_nvram_read(bp, offset32, start, 4)))
+		if ((rc = bnx2__read(bp, offset32, start, 4)))
 			return rc;
 	}
 
 	if (len32 & 3) {
 		align_end = 4 - (len32 & 3);
 		len32 += align_end;
-		if ((rc = bnx2_nvram_read(bp, offset32 + len32 - 4, end, 4)))
+		if ((rc = bnx2__read(bp, offset32 + len32 - 4, end, 4)))
 			return rc;
 	}
 
@@ -4576,7 +4576,7 @@ bnx2_nvram_write(struct bnx2 *bp, u32 offset, u8 *data_buf,
 		flash_buffer = kmalloc(264, GFP_KERNEL);
 		if (!flash_buffer) {
 			rc = -ENOMEM;
-			goto nvram_write_end;
+			goto _write_end;
 		}
 	}
 
@@ -4598,11 +4598,11 @@ bnx2_nvram_write(struct bnx2 *bp, u32 offset, u8 *data_buf,
 			(offset32 + len32) : page_end;
 
 		/* Request access to the flash interface. */
-		if ((rc = bnx2_acquire_nvram_lock(bp)) != 0)
-			goto nvram_write_end;
+		if ((rc = bnx2_acquire__lock(bp)) != 0)
+			goto _write_end;
 
 		/* Enable access to flash interface */
-		bnx2_enable_nvram_access(bp);
+		bnx2_enable__access(bp);
 
 		cmd_flags = BNX2_NVM_COMMAND_FIRST;
 		if (!(bp->flash_info->flags & BNX2_NV_BUFFERED)) {
@@ -4614,41 +4614,41 @@ bnx2_nvram_write(struct bnx2 *bp, u32 offset, u8 *data_buf,
 				if (j == (bp->flash_info->page_size - 4)) {
 					cmd_flags |= BNX2_NVM_COMMAND_LAST;
 				}
-				rc = bnx2_nvram_read_dword(bp,
+				rc = bnx2__read_dword(bp,
 					page_start + j,
 					&flash_buffer[j],
 					cmd_flags);
 
 				if (rc)
-					goto nvram_write_end;
+					goto _write_end;
 
 				cmd_flags = 0;
 			}
 		}
 
 		/* Enable writes to flash interface (unlock write-protect) */
-		if ((rc = bnx2_enable_nvram_write(bp)) != 0)
-			goto nvram_write_end;
+		if ((rc = bnx2_enable__write(bp)) != 0)
+			goto _write_end;
 
 		/* Loop to write back the buffer data from page_start to
 		 * data_start */
 		i = 0;
 		if (!(bp->flash_info->flags & BNX2_NV_BUFFERED)) {
 			/* Erase the page */
-			if ((rc = bnx2_nvram_erase_page(bp, page_start)) != 0)
-				goto nvram_write_end;
+			if ((rc = bnx2__erase_page(bp, page_start)) != 0)
+				goto _write_end;
 
 			/* Re-enable the write again for the actual write */
-			bnx2_enable_nvram_write(bp);
+			bnx2_enable__write(bp);
 
 			for (addr = page_start; addr < data_start;
 				addr += 4, i += 4) {
 
-				rc = bnx2_nvram_write_dword(bp, addr,
+				rc = bnx2__write_dword(bp, addr,
 					&flash_buffer[i], cmd_flags);
 
 				if (rc != 0)
-					goto nvram_write_end;
+					goto _write_end;
 
 				cmd_flags = 0;
 			}
@@ -4662,11 +4662,11 @@ bnx2_nvram_write(struct bnx2 *bp, u32 offset, u8 *data_buf,
 
 				cmd_flags |= BNX2_NVM_COMMAND_LAST;
 			}
-			rc = bnx2_nvram_write_dword(bp, addr, buf,
+			rc = bnx2__write_dword(bp, addr, buf,
 				cmd_flags);
 
 			if (rc != 0)
-				goto nvram_write_end;
+				goto _write_end;
 
 			cmd_flags = 0;
 			buf += 4;
@@ -4681,28 +4681,28 @@ bnx2_nvram_write(struct bnx2 *bp, u32 offset, u8 *data_buf,
 				if (addr == page_end-4) {
 					cmd_flags = BNX2_NVM_COMMAND_LAST;
                 		}
-				rc = bnx2_nvram_write_dword(bp, addr,
+				rc = bnx2__write_dword(bp, addr,
 					&flash_buffer[i], cmd_flags);
 
 				if (rc != 0)
-					goto nvram_write_end;
+					goto _write_end;
 
 				cmd_flags = 0;
 			}
 		}
 
 		/* Disable writes to flash interface (lock write-protect) */
-		bnx2_disable_nvram_write(bp);
+		bnx2_disable__write(bp);
 
 		/* Disable access to flash interface */
-		bnx2_disable_nvram_access(bp);
-		bnx2_release_nvram_lock(bp);
+		bnx2_disable__access(bp);
+		bnx2_release__lock(bp);
 
 		/* Increment written */
 		written += data_end - data_start;
 	}
 
-nvram_write_end:
+_write_end:
 	kfree(flash_buffer);
 	kfree(align_buf);
 	return rc;
@@ -4960,7 +4960,7 @@ bnx2_init_chip(struct bnx2 *bp)
 	if ((rc = bnx2_init_cpus(bp)) != 0)
 		return rc;
 
-	bnx2_init_nvram(bp);
+	bnx2_init_(bp);
 
 	bnx2_set_mac_addr(bp, bp->dev->dev_addr, 0);
 
@@ -5960,33 +5960,33 @@ bnx2_test_loopback(struct bnx2 *bp)
 	return rc;
 }
 
-#define NVRAM_SIZE 0x200
+#define _SIZE 0x200
 #define CRC32_RESIDUAL 0xdebb20e3
 
 static int
-bnx2_test_nvram(struct bnx2 *bp)
+bnx2_test_(struct bnx2 *bp)
 {
-	__be32 buf[NVRAM_SIZE / 4];
+	__be32 buf[_SIZE / 4];
 	u8 *data = (u8 *) buf;
 	int rc = 0;
 	u32 magic, csum;
 
-	if ((rc = bnx2_nvram_read(bp, 0, data, 4)) != 0)
-		goto test_nvram_done;
+	if ((rc = bnx2__read(bp, 0, data, 4)) != 0)
+		goto test__done;
 
         magic = be32_to_cpu(buf[0]);
 	if (magic != 0x669955aa) {
 		rc = -ENODEV;
-		goto test_nvram_done;
+		goto test__done;
 	}
 
-	if ((rc = bnx2_nvram_read(bp, 0x100, data, NVRAM_SIZE)) != 0)
-		goto test_nvram_done;
+	if ((rc = bnx2__read(bp, 0x100, data, _SIZE)) != 0)
+		goto test__done;
 
 	csum = ether_crc_le(0x100, data);
 	if (csum != CRC32_RESIDUAL) {
 		rc = -ENODEV;
-		goto test_nvram_done;
+		goto test__done;
 	}
 
 	csum = ether_crc_le(0x100, data + 0x100);
@@ -5994,7 +5994,7 @@ bnx2_test_nvram(struct bnx2 *bp)
 		rc = -ENODEV;
 	}
 
-test_nvram_done:
+test__done:
 	return rc;
 }
 
@@ -7229,7 +7229,7 @@ bnx2_get_eeprom(struct net_device *dev, struct ethtool_eeprom *eeprom,
 
 	/* parameters already validated in ethtool_get_eeprom */
 
-	rc = bnx2_nvram_read(bp, eeprom->offset, eebuf, eeprom->len);
+	rc = bnx2__read(bp, eeprom->offset, eebuf, eeprom->len);
 
 	return rc;
 }
@@ -7243,7 +7243,7 @@ bnx2_set_eeprom(struct net_device *dev, struct ethtool_eeprom *eeprom,
 
 	/* parameters already validated in ethtool_set_eeprom */
 
-	rc = bnx2_nvram_write(bp, eeprom->offset, eebuf, eeprom->len);
+	rc = bnx2__write(bp, eeprom->offset, eebuf, eeprom->len);
 
 	return rc;
 }
@@ -7577,7 +7577,7 @@ static struct {
 	{ "register_test (offline)" },
 	{ "memory_test (offline)" },
 	{ "loopback_test (offline)" },
-	{ "nvram_test (online)" },
+	{ "_test (online)" },
 	{ "interrupt_test (online)" },
 	{ "link_test (online)" },
 };
@@ -7634,7 +7634,7 @@ bnx2_self_test(struct net_device *dev, struct ethtool_test *etest, u64 *buf)
 		}
 	}
 
-	if (bnx2_test_nvram(bp) != 0) {
+	if (bnx2_test_(bp) != 0) {
 		buf[3] = 1;
 		etest->flags |= ETH_TEST_FL_FAILED;
 	}
@@ -8039,7 +8039,7 @@ bnx2_read_vpd_fw_ver(struct bnx2 *bp)
 	u8 *data;
 	unsigned int block_end, rosize, len;
 
-#define BNX2_VPD_NVRAM_OFFSET	0x300
+#define BNX2_VPD__OFFSET	0x300
 #define BNX2_VPD_LEN		128
 #define BNX2_MAX_VER_SLEN	30
 
@@ -8047,7 +8047,7 @@ bnx2_read_vpd_fw_ver(struct bnx2 *bp)
 	if (!data)
 		return;
 
-	rc = bnx2_nvram_read(bp, BNX2_VPD_NVRAM_OFFSET, data + BNX2_VPD_LEN,
+	rc = bnx2__read(bp, BNX2_VPD__OFFSET, data + BNX2_VPD_LEN,
 			     BNX2_VPD_LEN);
 	if (rc)
 		goto vpd_done;
@@ -8255,7 +8255,7 @@ bnx2_init_board(struct pci_dev *pdev, struct net_device *dev)
 		goto err_out_unmap;
 	}
 
-	bnx2_init_nvram(bp);
+	bnx2_init_(bp);
 
 	reg = bnx2_reg_rd_ind(bp, BNX2_SHM_HDR_SIGNATURE);
 

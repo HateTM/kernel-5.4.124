@@ -21,6 +21,7 @@ endif
 
 ifneq ($(CONFIG_USB_XHCI_MTK), )
 	xhci-hcd-y += xhci-mtk-sch.o
+	xhci-hcd-$(CONFIG_USB_XHCI_MTK_DEBUGFS)	+= xhci-mtk-test.o
 endif
 
 xhci-plat-hcd-y := xhci-plat.o

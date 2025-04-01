@@ -695,7 +695,16 @@ _request_firmware_prepare(struct firmware **firmware_p, const char *name,
 	struct fw_priv *fw_priv;
 	int ret;
 
-	*firmware_p = firmware = kzalloc(sizeof(*firmware), GFP_KERNEL);
+#ifdef CONFIG_TP_FW_DL_MEM_PREMALLOC
+	if (strstr(name, "7986"))
+	{
+		*firmware_p = firmware = (struct firmware *)ioremap(0x40000000, 0x400000);
+		printk("alloc fw image size addr---------------%s\n", name);
+	}
+	else
+#endif
+		*firmware_p = firmware = kzalloc(sizeof(*firmware), GFP_KERNEL);
+
 	if (!firmware) {
 		dev_err(device, "%s: kmalloc(struct firmware) failed\n",
 			__func__);
@@ -792,7 +801,10 @@ _request_firmware(const struct firmware **firmware_p, const char *name,
  out:
 	if (ret < 0) {
 		fw_abort_batch_reqs(fw);
-		release_firmware(fw);
+#ifdef CONFIG_TP_FW_DL_MEM_PREMALLOC
+		if (!strstr(name, "7986"))
+#endif
+			release_firmware(fw);
 		fw = NULL;
 	}
 

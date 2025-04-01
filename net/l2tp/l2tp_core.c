@@ -1010,6 +1010,9 @@ static void l2tp_xmit_core(struct l2tp_session *session, struct sk_buff *skb,
 	struct l2tp_tunnel *tunnel = session->tunnel;
 	unsigned int len = skb->len;
 	int error;
+#ifdef CONFIG_TP_IMAGE	
+	u32 tmpMark = 0;
+#endif /*CONFIG_TP_IMAGE*/	
 
 	/* Debug */
 	if (session->send_seq)
@@ -1030,6 +1033,18 @@ static void l2tp_xmit_core(struct l2tp_session *session, struct sk_buff *skb,
 
 	/* Queue the packet to IP for output */
 	skb->ignore_df = 1;
+	/* 
+	 * Hanjiayan@20180312 add
+	 * For in ip_queue_xmit, skb->mark will be rewrote by sk->sk_mark, 
+	 * which will cause QoS failure.
+	 */
+#ifdef CONFIG_TP_IMAGE	
+	if(0 != skb->mark){
+		tmpMark = tunnel->sock->sk_mark;
+		tunnel->sock->sk_mark = skb->mark;
+	}
+#endif /*CONFIG_TP_IMAGE*/	
+
 	skb_dst_drop(skb);
 #if IS_ENABLED(CONFIG_IPV6)
 	if (l2tp_sk_is_v6(tunnel->sock))
@@ -1037,6 +1052,11 @@ static void l2tp_xmit_core(struct l2tp_session *session, struct sk_buff *skb,
 	else
 #endif
 		error = ip_queue_xmit(tunnel->sock, skb, fl);
+
+#ifdef CONFIG_TP_IMAGE	
+	if(tmpMark != tunnel->sock->sk_mark)
+		tunnel->sock->sk_mark = tmpMark;
+#endif /*CONFIG_TP_IMAGE*/	
 
 	/* Update stats */
 	if (error >= 0) {

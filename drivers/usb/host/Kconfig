@@ -69,6 +69,15 @@ config USB_XHCI_MTK
 	  found in MediaTek SoCs.
 	  If unsure, say N.
 
+config USB_XHCI_MTK_DEBUGFS
+	tristate "xHCI DEBUGFS support for Mediatek MT65xx"
+	depends on USB_XHCI_MTK && DEBUG_FS
+       default y
+	---help---
+	  Say 'Y' to enable the debugfs support for the xHCI host controller
+	  found in Mediatek MT65xx SoCs.
+	  If don't need, say N.
+
 config USB_XHCI_MVEBU
 	tristate "xHCI support for Marvell Armada 375/38x/37xx"
 	select USB_XHCI_PLATFORM

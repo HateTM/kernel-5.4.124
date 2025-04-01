@@ -26,6 +26,12 @@ menuconfig NET
 
 if NET
 
+config ETHERNET_PACKET_MANGLE
+	bool
+	help
+	  This option can be selected by phy drivers that need to mangle
+	  packets going in or out of an ethernet device.
+
 config WANT_COMPAT_NETLINK_MESSAGES
 	bool
 	help
@@ -96,6 +102,9 @@ source "net/ipv6/Kconfig"
 source "net/netlabel/Kconfig"
 
 endif # if INET
+
+config SOCK_DIAG
+	bool
 
 config NETWORK_SECMARK
 	bool "Security Marking"
@@ -450,6 +459,18 @@ config FAILOVER
 	  VF as an accelerated low latency datapath. It also allows live
 	  migration of VMs with direct attached VFs by failing over to the
 	  paravirtual datapath when the VF is unplugged.
+
+config HW_NAT
+	bool "HW NAT support"
+	default n
+	---help---
+	 This feature provides a fast path to support network lan/wan nat.
+	 If you need hw_nat engine to reduce cpu loading, please say Y.
+
+	  Note that the answer to this question doesn't directly affect the
+	  kernel: saying N will just cause the configurator to skip all
+	  the questions about Mediatek Ethernet devices. If you say Y,
+	  you will be asked for your specific card in the following questions.
 
 endif   # if NET
 

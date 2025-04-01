@@ -34,6 +34,14 @@
 
 #include "br_private.h"
 
+#ifdef CONFIG_TP_IMAGE
+#include <linux/inetdevice.h>
+
+#define IS_IGMP_V3(br_dev) \
+	((IPV4_DEVCONF_ALL(dev_net(br_dev->dev), FORCE_IGMP_VERSION) == 3) || \
+	 (IPV4_DEVCONF_ALL(dev_net(br_dev->dev), FORCE_IGMP_VERSION) == 0))
+#endif /*CONFIG_TP_IMAGE*/
+
 static const struct rhashtable_params br_mdb_rht_params = {
 	.head_offset = offsetof(struct net_bridge_mdb_entry, rhnode),
 	.key_offset = offsetof(struct net_bridge_mdb_entry, addr),
@@ -306,6 +314,86 @@ out:
 	return skb;
 }
 
+#ifdef CONFIG_TP_IMAGE
+static struct sk_buff *br_ip4_multicast_alloc_query_v3(struct net_bridge *br,
+							__be32 group, u8 *igmp_type)
+{
+	struct sk_buff *skb;
+	struct igmpv3_query *ih3;
+	struct ethhdr *eth;
+	struct iphdr *iph;
+
+	skb = netdev_alloc_skb_ip_align(br->dev, sizeof(*eth) + sizeof(*iph) +
+						 sizeof(*ih3) + 4);
+	if (!skb)
+		goto out;
+
+	skb->protocol = htons(ETH_P_IP);
+
+	skb_reset_mac_header(skb);
+	eth = eth_hdr(skb);
+
+	memcpy(eth->h_source, br->dev->dev_addr, 6);
+	eth->h_dest[0] = 1;
+	eth->h_dest[1] = 0;
+	eth->h_dest[2] = 0x5e;
+	eth->h_dest[3] = 0;
+	eth->h_dest[4] = 0;
+	eth->h_dest[5] = 1;
+	eth->h_proto = htons(ETH_P_IP);
+	skb_put(skb, sizeof(*eth));
+
+	skb_set_network_header(skb, skb->len);
+	iph = ip_hdr(skb);
+
+	iph->version = 4;
+	iph->ihl = 6;
+	iph->tos = 0xc0;
+	iph->tot_len = htons(sizeof(*iph) + sizeof(*ih3) + 4);
+	iph->id = 0;
+	iph->frag_off = htons(IP_DF);
+	iph->ttl = 1;
+	iph->protocol = IPPROTO_IGMP;
+	iph->saddr = 0;
+	iph->daddr = htonl(INADDR_ALLHOSTS_GROUP);
+	((u8 *)&iph[1])[0] = IPOPT_RA;
+	((u8 *)&iph[1])[1] = 4;
+	((u8 *)&iph[1])[2] = 0;
+	((u8 *)&iph[1])[3] = 0;
+	ip_send_check(iph);
+	skb_put(skb, 24);
+
+	skb_set_transport_header(skb, skb->len);
+	*igmp_type = IGMP_HOST_MEMBERSHIP_QUERY;
+	ih3 = igmpv3_query_hdr(skb);
+	ih3->type = IGMP_HOST_MEMBERSHIP_QUERY;
+	ih3->code = (group ? br->multicast_last_member_interval :
+				br->multicast_query_response_interval) /
+		   (HZ / IGMP_TIMER_SCALE);
+	ih3->group = group;
+	ih3->qrv = 2;
+	ih3->qqic = br->multicast_query_interval;
+
+	/*
+	 * The initial value of the the member variable of ih3 may not be 0,
+	 * To avoid malformed packet, each variable needs to be assigned.
+	 * Add by wang heng, 21/Dec/20
+	 */
+	ih3->resv = 0;
+	ih3->suppress = 0;
+	ih3->nsrcs = 0;
+
+	ih3->csum = 0;
+	ih3->csum = ip_compute_csum((void *)ih3, sizeof(struct igmpv3_query));
+	skb_put(skb, sizeof(*ih3));
+
+	__skb_pull(skb, sizeof(*eth));
+
+out:
+	return skb;
+}
+#endif /*#ifdef CONFIG_TP_IMAGE*/
+
 #if IS_ENABLED(CONFIG_IPV6)
 static struct sk_buff *br_ip6_multicast_alloc_query(struct net_bridge *br,
 						    const struct in6_addr *grp,
@@ -426,7 +514,16 @@ static struct sk_buff *br_multicast_alloc_query(struct net_bridge *br,
 {
 	switch (addr->proto) {
 	case htons(ETH_P_IP):
+#ifdef CONFIG_TP_IMAGE
+		if(IS_IGMP_V3(br)){
+			return br_ip4_multicast_alloc_query_v3(br, addr->u.ip4, igmp_type);
+		}else{
+			return br_ip4_multicast_alloc_query(br, addr->u.ip4, igmp_type);
+		}
+#else
 		return br_ip4_multicast_alloc_query(br, addr->u.ip4, igmp_type);
+#endif /*CONFIG_TP_IMAGE*/
+
 #if IS_ENABLED(CONFIG_IPV6)
 	case htons(ETH_P_IPV6):
 		return br_ip6_multicast_alloc_query(br, &addr->u.ip6,
@@ -1669,8 +1766,10 @@ static int br_multicast_ipv6_rcv(struct net_bridge *br,
 	err = ipv6_mc_check_mld(skb);
 
 	if (err == -ENOMSG || err == -ENODATA) {
+#ifndef CONFIG_TP_IMAGE
 		if (!ipv6_addr_is_ll_all_nodes(&ipv6_hdr(skb)->daddr))
 			BR_INPUT_SKB_CB(skb)->mrouters_only = 1;
+#endif
 		if (err == -ENODATA &&
 		    ipv6_addr_is_all_snoopers(&ipv6_hdr(skb)->daddr))
 			br_ip6_multicast_mrd_rcv(br, port, skb);
@@ -1789,6 +1888,9 @@ void br_multicast_init(struct net_bridge *br)
 #endif
 	br_opt_toggle(br, BROPT_MULTICAST_ENABLED, true);
 	br_opt_toggle(br, BROPT_HAS_IPV6_ADDR, true);
+#ifdef CONFIG_TP_IMAGE
+	br_opt_toggle(br, BROPT_MULTICAST_QUERIER, true);
+#endif
 
 	spin_lock_init(&br->multicast_lock);
 	timer_setup(&br->multicast_router_timer,

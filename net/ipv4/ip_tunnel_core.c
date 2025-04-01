@@ -35,6 +35,13 @@
 #include <net/rtnetlink.h>
 #include <net/dst_metadata.h>
 
+/* add by wanghao */
+#ifdef CONFIG_SFE_TUNNEL_HEADER
+int (*sfe_tunnel_6in4ParsePtr)(struct sk_buff *skb) __rcu __read_mostly;
+EXPORT_SYMBOL_GPL(sfe_tunnel_6in4ParsePtr);
+#endif
+/* add end */
+
 const struct ip_tunnel_encap_ops __rcu *
 		iptun_encaps[MAX_IPTUN_ENCAP_OPS] __read_mostly;
 EXPORT_SYMBOL(iptun_encaps);
@@ -52,6 +59,9 @@ void iptunnel_xmit(struct sock *sk, struct rtable *rt, struct sk_buff *skb,
 	struct net_device *dev = skb->dev;
 	struct iphdr *iph;
 	int err;
+#ifdef CONFIG_SFE_TUNNEL_HEADER
+	int (*tunnel_parse)(struct sk_buff *skb) = NULL;
+#endif
 
 	skb_scrub_packet(skb, xnet);
 
@@ -74,6 +84,17 @@ void iptunnel_xmit(struct sock *sk, struct rtable *rt, struct sk_buff *skb,
 	iph->saddr	=	src;
 	iph->ttl	=	ttl;
 	__ip_select_ident(net, iph, skb_shinfo(skb)->gso_segs ?: 1);
+
+	/* add by wanghao */
+#ifdef CONFIG_SFE_TUNNEL_HEADER
+	rcu_read_lock();
+	tunnel_parse = rcu_dereference(sfe_tunnel_6in4ParsePtr);
+	if (tunnel_parse) {
+		tunnel_parse(skb);
+	}
+	rcu_read_unlock();
+#endif
+	/* add end */
 
 	err = ip_local_out(net, sk, skb);
 
@@ -446,3 +467,21 @@ void ip_tunnel_unneed_metadata(void)
 	static_branch_dec(&ip_tunnel_metadata_cnt);
 }
 EXPORT_SYMBOL_GPL(ip_tunnel_unneed_metadata);
+
+/* Returns either the correct skb->protocol value, or 0 if invalid. */
+__be16 ip_tunnel_parse_protocol(const struct sk_buff *skb)
+{
+	if (skb_network_header(skb) >= skb->head &&
+	    (skb_network_header(skb) + sizeof(struct iphdr)) <= skb_tail_pointer(skb) &&
+	    ip_hdr(skb)->version == 4)
+		return htons(ETH_P_IP);
+	if (skb_network_header(skb) >= skb->head &&
+	    (skb_network_header(skb) + sizeof(struct ipv6hdr)) <= skb_tail_pointer(skb) &&
+	    ipv6_hdr(skb)->version == 6)
+		return htons(ETH_P_IPV6);
+	return 0;
+}
+EXPORT_SYMBOL(ip_tunnel_parse_protocol);
+
+const struct header_ops ip_tunnel_header_ops = { .parse_protocol = ip_tunnel_parse_protocol };
+EXPORT_SYMBOL(ip_tunnel_header_ops);

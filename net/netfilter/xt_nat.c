@@ -12,6 +12,9 @@
 #include <linux/netfilter.h>
 #include <linux/netfilter/x_tables.h>
 #include <net/netfilter/nf_nat.h>
+#ifdef CONFIG_TP_IMAGE
+#include <linux/inetdevice.h>
+#endif /*CONFIG_TP_IMAGE*/
 
 static int xt_nat_checkentry_v0(const struct xt_tgchk_param *par)
 {
@@ -60,6 +63,27 @@ xt_snat_target_v0(struct sk_buff *skb, const struct xt_action_param *par)
 	WARN_ON(!(ct != NULL &&
 		 (ctinfo == IP_CT_NEW || ctinfo == IP_CT_RELATED ||
 		  ctinfo == IP_CT_RELATED_REPLY)));
+		  
+#ifdef CONFIG_TP_IMAGE
+		/* If not DNAT status we have to skip loopback, add by Jason Guo <guodongxian@tp-link.net> */
+		{
+			struct in_device *in_dev = in_dev_get(par->state->out);
+			__be32 mask = 0;
+			
+			if (in_dev && in_dev->ifa_list)
+			{
+				mask = in_dev->ifa_list->ifa_mask;
+				in_dev_put(in_dev);
+				if ((ip_hdr(skb)->saddr & mask) == (ip_hdr(skb)->daddr & mask))
+				{
+					if (!test_bit(IPS_DST_NAT_BIT, &ct->status) || !test_bit(IPS_DST_NAT_DONE_BIT, &ct->status))
+					{
+						return XT_CONTINUE;
+					}
+				}
+			}
+		}	
+#endif /*CONFIG_TP_IMAGE*/	
 
 	xt_nat_convert_range(&range, &mr->range[0]);
 	return nf_nat_setup_info(ct, &range, NF_NAT_MANIP_SRC);

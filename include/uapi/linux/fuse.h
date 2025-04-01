@@ -485,7 +485,10 @@ enum fuse_notify_code {
 };
 
 /* The read buffer is required to be at least 8k, but may be much larger */
-#define FUSE_MIN_READ_BUFFER 8192
+/* change by TP_IMAGE */
+//#define FUSE_MIN_READ_BUFFER 8192
+#define FUSE_MIN_READ_BUFFER 65536
+/* end TP_IMAGE */
 
 #define FUSE_COMPAT_ENTRY_OUT_SIZE 120
 

@@ -5,17 +5,56 @@
 #include <linux/rtnetlink.h>
 #include <linux/skbuff.h>
 #include <net/switchdev.h>
+#include <net/dsa.h>
+#include <linux/if_macvlan.h>
+#include <linux/if_vlan.h>
 
 #include "br_private.h"
+
+#if defined(CONFIG_TP_IMAGE) && defined(CONFIG_NET_DSA_MT7530)
+static bool vif_real_dev_is_dsa_slave(struct net_device *dev)
+{
+	struct net_device * parent;
+
+	if (is_vlan_dev(dev))
+	{
+		parent = vlan_dev_real_dev(dev);
+	}
+#if defined(CONFIG_X_TP_VLAN)
+	else if (netif_is_macvlan(dev))
+	{
+		parent = macvlan_dev_real_dev(dev);
+	}
+#endif
+	else if (netif_is_bond_master(dev)) {
+		return true;
+	}
+	else
+	{
+		return false;
+	}
+
+	return dsa_slave_dev_check(parent);
+}
+#endif
 
 static int br_switchdev_mark_get(struct net_bridge *br, struct net_device *dev)
 {
 	struct net_bridge_port *p;
 
-	/* dev is yet to be added to the port list. */
-	list_for_each_entry(p, &br->port_list, list) {
-		if (netdev_port_same_parent_id(dev, p->dev))
-			return p->offload_fwd_mark;
+#ifdef CONFIG_TP_HYFI_BRIDGE
+	return ++br->offload_fwd_mark;
+#endif
+
+#if defined(CONFIG_TP_IMAGE) && defined(CONFIG_NET_DSA_MT7530)
+	if (!vif_real_dev_is_dsa_slave(dev))
+#endif
+	{
+		/* dev is yet to be added to the port list. */
+		list_for_each_entry(p, &br->port_list, list) {
+			if (netdev_port_same_parent_id(dev, p->dev))
+				return p->offload_fwd_mark;
+		}
 	}
 
 	return ++br->offload_fwd_mark;
@@ -102,42 +141,27 @@ int br_switchdev_set_port_flag(struct net_bridge_port *p,
 	return 0;
 }
 
-static void
-br_switchdev_fdb_call_notifiers(bool adding, const unsigned char *mac,
-				u16 vid, struct net_device *dev,
-				bool added_by_user, bool offloaded)
-{
-	struct switchdev_notifier_fdb_info info;
-	unsigned long notifier_type;
-
-	info.addr = mac;
-	info.vid = vid;
-	info.added_by_user = added_by_user;
-	info.offloaded = offloaded;
-	notifier_type = adding ? SWITCHDEV_FDB_ADD_TO_DEVICE : SWITCHDEV_FDB_DEL_TO_DEVICE;
-	call_switchdev_notifiers(notifier_type, dev, &info.info, NULL);
-}
-
 void
-br_switchdev_fdb_notify(const struct net_bridge_fdb_entry *fdb, int type)
+br_switchdev_fdb_notify(struct net_bridge *br,
+			const struct net_bridge_fdb_entry *fdb, int type)
 {
-	if (!fdb->dst)
-		return;
+	struct switchdev_notifier_fdb_info info = {
+		.addr = fdb->key.addr.addr,
+		.vid = fdb->key.vlan_id,
+		.added_by_user = fdb->added_by_user,
+		.local = fdb->is_local,
+		.offloaded = fdb->offloaded,
+	};
+	struct net_device *dev = fdb->dst ? fdb->dst->dev : br->dev;
 
 	switch (type) {
 	case RTM_DELNEIGH:
-		br_switchdev_fdb_call_notifiers(false, fdb->key.addr.addr,
-						fdb->key.vlan_id,
-						fdb->dst->dev,
-						fdb->added_by_user,
-						fdb->offloaded);
+		call_switchdev_notifiers(SWITCHDEV_FDB_DEL_TO_DEVICE,
+					 dev, &info.info, NULL);
 		break;
 	case RTM_NEWNEIGH:
-		br_switchdev_fdb_call_notifiers(true, fdb->key.addr.addr,
-						fdb->key.vlan_id,
-						fdb->dst->dev,
-						fdb->added_by_user,
-						fdb->offloaded);
+		call_switchdev_notifiers(SWITCHDEV_FDB_ADD_TO_DEVICE,
+					 dev, &info.info, NULL);
 		break;
 	}
 }

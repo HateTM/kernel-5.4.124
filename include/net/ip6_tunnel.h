@@ -9,6 +9,10 @@
 #include <net/ip_tunnels.h>
 #include <net/dst_cache.h>
 
+#ifdef CONFIG_TP_IMAGE
+#include <net/ip6_route.h>
+#endif /*CONFIG_TP_IMAGE*/
+
 #define IP6TUNNEL_ERR_TIMEO (30*HZ)
 
 /* capable of sending packets */
@@ -17,6 +21,18 @@
 #define IP6_TNL_F_CAP_RCV 0x20000
 /* determine capability on a per-packet basis */
 #define IP6_TNL_F_CAP_PER_PACKET 0x40000
+
+/* IPv6 tunnel FMR */
+struct __ip6_tnl_fmr {
+	struct __ip6_tnl_fmr *next; /* next fmr in list */
+	struct in6_addr ip6_prefix;
+	struct in_addr ip4_prefix;
+
+	__u8 ip6_prefix_len;
+	__u8 ip4_prefix_len;
+	__u8 ea_len;
+	__u8 offset;
+};
 
 struct __ip6_tnl_parm {
 	char name[IFNAMSIZ];	/* name of tunnel device */
@@ -29,6 +45,11 @@ struct __ip6_tnl_parm {
 	__u32 flags;		/* tunnel flags */
 	struct in6_addr laddr;	/* local tunnel end-point address */
 	struct in6_addr raddr;	/* remote tunnel end-point address */
+#ifdef CONFIG_TP_IMAGE
+	struct in_addr fakeIpaddr;
+	__u32 fmrtrunk;
+#endif /*CONFIG_TP_IMAGE*/
+	struct __ip6_tnl_fmr *fmrs;	/* FMRs */
 
 	__be16			i_flags;
 	__be16			o_flags;
@@ -157,7 +178,18 @@ static inline void ip6tunnel_xmit(struct sock *sk, struct sk_buff *skb,
 
 	memset(skb->cb, 0, sizeof(struct inet6_skb_parm));
 	pkt_len = skb->len - skb_inner_network_offset(skb);
+#ifdef CONFIG_TP_IMAGE
+	if (skb->len > ip6_skb_dst_mtu(skb))
+	{
+		err = ip6_fragment(dev_net(skb_dst(skb)->dev), sk, skb, ip6_local_out);
+	}
+	else
+	{
+		err = ip6_local_out(dev_net(skb_dst(skb)->dev), sk, skb);
+	}
+#else
 	err = ip6_local_out(dev_net(skb_dst(skb)->dev), sk, skb);
+#endif /*CONFIG_TP_IMAGE*/
 
 	if (dev) {
 		if (unlikely(net_xmit_eval(err)))

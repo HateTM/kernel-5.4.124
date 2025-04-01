@@ -383,6 +383,19 @@ static int spinand_read_id_op(struct spinand_device *spinand, u8 *buf)
 	return ret;
 }
 
+static int spinand_read_id_op_esmt(struct spinand_device *spinand, u8 *buf)
+{
+	struct spi_mem_op op = SPINAND_READID_OP_ESMT(0, spinand->scratchbuf,
+						 SPINAND_MAX_ID_LEN);
+	int ret;
+
+	ret = spi_mem_exec_op(spinand->spimem, &op);
+	if (!ret)
+		memcpy(buf, spinand->scratchbuf, SPINAND_MAX_ID_LEN);
+
+	return ret;
+}
+
 static int spinand_reset_op(struct spinand_device *spinand)
 {
 	struct spi_mem_op op = SPINAND_RESET_OP;
@@ -751,7 +764,16 @@ static const struct nand_ops spinand_ops = {
 	.isbad = spinand_isbad,
 };
 
+/* 
+	ESMT has it's own reading id mechanism. 
+	To be compatible with other devices, ESMT's mechanism is executed after
+	the original mechanism is tried.			
+	
+	NOTICE: ESMT should be put first here or it will enter giga matching flow
+	as giga and esmt share the same manufacturer code.
+*/
 static const struct spinand_manufacturer *spinand_manufacturers[] = {
+	&esmt_spinand_manufacturer,
 	&gigadevice_spinand_manufacturer,
 	&macronix_spinand_manufacturer,
 	&micron_spinand_manufacturer,
@@ -904,9 +926,18 @@ static int spinand_detect(struct spinand_device *spinand)
 
 	ret = spinand_manufacturer_detect(spinand);
 	if (ret) {
-		dev_err(dev, "unknown raw ID %*phN\n", SPINAND_MAX_ID_LEN,
-			spinand->id.data);
-		return ret;
+		printk("No nand flash found, try esmt\n");
+		ret = spinand_read_id_op_esmt(spinand, spinand->id.data);
+		if (ret)
+			return ret;
+
+		ret = spinand_manufacturer_detect(spinand);
+		if (ret)
+		{	
+			dev_err(dev, "unknown raw ID %*phN\n", SPINAND_MAX_ID_LEN,
+				spinand->id.data);
+			return ret;
+		}
 	}
 
 	if (nand->memorg.ntargets > 1 && !spinand->select_target) {

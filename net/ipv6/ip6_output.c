@@ -980,6 +980,9 @@ fail:
 	kfree_skb(skb);
 	return err;
 }
+#ifdef CONFIG_TP_IMAGE
+EXPORT_SYMBOL(ip6_fragment);
+#endif
 
 static inline int ip6_rt_check(const struct rt6key *rt_key,
 			       const struct in6_addr *fl_addr,

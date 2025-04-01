@@ -427,11 +427,31 @@ config SPI_MT65XX
 	  say Y or M here.If you are not sure, say N.
 	  SPI drivers for Mediatek MT65XX and MT81XX series ARM SoCs.
 
+config SPI_MTK_SNFI
+	tristate "MediaTek SPI NAND interface"
+	depends on MTD
+	select MTD_SPI_NAND
+	help
+	  This selects the SPI NAND FLASH interface(SNFI),
+	  which could be found on MediaTek Soc.
+	  Say Y or M here.If you are not sure, say N.
+	  Note Parallel Nand and SPI NAND is alternative on MediaTek SoCs.
+
 config SPI_MT7621
 	tristate "MediaTek MT7621 SPI Controller"
 	depends on RALINK || COMPILE_TEST
 	help
 	  This selects a driver for the MediaTek MT7621 SPI Controller.
+
+config SPI_MTK_NOR
+	tristate "MediaTek SPI NOR controller"
+	depends on ARCH_MEDIATEK || COMPILE_TEST
+	help
+	  This enables support for SPI NOR controller found on MediaTek
+	  ARM SoCs. This is a controller specifically for SPI-NOR flash.
+	  It can perform generic SPI transfers up to 6 bytes via generic
+	  SPI interface as well as several SPI-NOR specific instructions
+	  via SPI MEM interface.
 
 config SPI_NPCM_FIU
 	tristate "Nuvoton NPCM FLASH Interface Unit"

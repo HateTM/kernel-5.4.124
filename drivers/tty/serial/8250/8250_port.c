@@ -44,6 +44,11 @@
 #define UART_NPCM_TOR          7
 #define UART_NPCM_TOIE         BIT(7)  /* Timeout Interrupt Enable */
 
+
+#ifdef CONFIG_CMD_TEST_MODE
+extern bool test_mode_enable;
+#endif
+
 /*
  * Debugging.
  */
@@ -290,7 +295,7 @@ static const struct serial8250_config uart_config[] = {
 		.tx_loadsz	= 16,
 		.fcr		= UART_FCR_ENABLE_FIFO |
 				  UART_FCR_CLEAR_RCVR | UART_FCR_CLEAR_XMIT,
-		.flags		= UART_CAP_FIFO,
+		.flags		= UART_CAP_FIFO | UART_CAP_NMOD,
 	},
 	[PORT_NPCM] = {
 		.name		= "Nuvoton 16550",
@@ -1715,7 +1720,14 @@ unsigned char serial8250_rx_chars(struct uart_8250_port *up, unsigned char lsr)
 		lsr = serial_in(up, UART_LSR);
 	} while (lsr & (UART_LSR_DR | UART_LSR_BI));
 
+#ifdef CONFIG_CMD_TEST_MODE
+	if (test_mode_enable){
+		tty_flip_buffer_push(&port->state->port);
+	}
+#else
 	tty_flip_buffer_push(&port->state->port);
+#endif
+
 	return lsr;
 }
 EXPORT_SYMBOL_GPL(serial8250_rx_chars);
@@ -2577,6 +2589,11 @@ serial8250_do_set_termios(struct uart_port *port, struct ktermios *termios,
 	unsigned char cval;
 	unsigned long flags;
 	unsigned int baud, quot, frac = 0;
+
+	if (up->capabilities & UART_CAP_NMOD) {
+		termios->c_cflag = 0;
+		return;
+	}
 
 	if (up->capabilities & UART_CAP_MINI) {
 		termios->c_cflag &= ~(CSTOPB | PARENB | PARODD | CMSPAR);

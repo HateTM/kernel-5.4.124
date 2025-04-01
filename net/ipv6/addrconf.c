@@ -227,6 +227,21 @@ static struct ipv6_devconf ipv6_devconf __read_mostly = {
 		.initialized = false,
 	},
 	.use_oif_addrs_only	= 0,
+#ifdef CONFIG_TP_IMAGE
+#ifdef IPV6_EXPORT_NDISC_MOBIT
+	.ndisc_mbit = -1,
+	.ndisc_obit = -1,
+#endif
+#ifdef IPV6_EXPORT_DEFAULT_GATEWAY
+	.default_gateway = "",
+#endif
+#ifdef IPV6_EXPORT_ADDRCONF_SLAAC_ADDR
+	.slaac_addr 	= "",
+#endif	
+#ifdef IPV6_EXPORT_ADDRCONF_SEND_RS
+	.sendrs =  1,
+#endif
+#endif /* CONFIG_TP_IMAGE */
 	.ignore_routes_with_linkdown = 0,
 	.keep_addr_on_down	= 0,
 	.seg6_enabled		= 0,
@@ -281,6 +296,21 @@ static struct ipv6_devconf ipv6_devconf_dflt __read_mostly = {
 		.initialized = false,
 	},
 	.use_oif_addrs_only	= 0,
+#ifdef CONFIG_TP_IMAGE
+#ifdef IPV6_EXPORT_NDISC_MOBIT
+	.ndisc_mbit = -1,
+	.ndisc_obit = -1,
+#endif
+#ifdef IPV6_EXPORT_DEFAULT_GATEWAY
+	.default_gateway = "",
+#endif
+#ifdef IPV6_EXPORT_ADDRCONF_SLAAC_ADDR
+	.slaac_addr = "",
+#endif	
+#ifdef IPV6_EXPORT_ADDRCONF_SEND_RS
+	.sendrs =  1,
+#endif
+#endif /* CONFIG_TP_IMAGE */
 	.ignore_routes_with_linkdown = 0,
 	.keep_addr_on_down	= 0,
 	.seg6_enabled		= 0,
@@ -2592,6 +2622,13 @@ int addrconf_prefix_rcv_add_addr(struct net *net, struct net_device *dev,
 
 		if (IS_ERR_OR_NULL(ifp))
 			return -1;
+
+#ifdef CONFIG_TP_IMAGE
+#ifdef IPV6_EXPORT_ADDRCONF_SLAAC_ADDR
+		sprintf(in6_dev->cnf.slaac_addr, "%pI6", addr);
+		in6_dev->cnf.slaac_addr[39] = '\0';
+#endif
+#endif
 
 		create = 1;
 		spin_lock_bh(&ifp->lock);
@@ -5478,6 +5515,13 @@ static inline void ipv6_store_devconf(struct ipv6_devconf *cnf,
 	array[DEVCONF_ADDR_GEN_MODE] = cnf->addr_gen_mode;
 	array[DEVCONF_DISABLE_POLICY] = cnf->disable_policy;
 	array[DEVCONF_NDISC_TCLASS] = cnf->ndisc_tclass;
+#ifdef CONFIG_TP_IMAGE
+#ifdef IPV6_EXPORT_NDISC_MOBIT
+	array[DEVCONF_NDISC_MBIT] = cnf->ndisc_mbit;
+	array[DEVCONF_NDISC_OBIT] = cnf->ndisc_obit;
+#endif
+#endif /* CONFIG_TP_IMAGE */
+
 }
 
 static inline size_t inet6_ifla6_size(void)
@@ -6381,6 +6425,51 @@ int addrconf_sysctl_ignore_routes_with_linkdown(struct ctl_table *ctl,
 	return ret;
 }
 
+#ifdef CONFIG_TP_IMAGE
+static int addrconf_sendrs(struct ctl_table *ctl, int write,
+				void __user *buffer, size_t *lenp, loff_t *ppos)
+{
+	int *valp = ctl->data;
+	int ret = 0;
+
+	struct net *net = NULL;
+	struct inet6_ifaddr *ifp = NULL;
+	struct inet6_dev *i6dev = NULL;
+	ret = proc_dointvec(ctl, write, buffer, lenp, ppos);
+
+	if (write)
+	{
+		net = (struct net *)ctl->extra2;
+		i6dev = (struct inet6_dev *)ctl->extra1;
+		if (valp == &net->ipv6.devconf_dflt->sendrs)
+			return 0;
+
+		read_lock_bh(&i6dev->lock);
+		list_for_each_entry(ifp, &i6dev->addr_list, if_list) 
+		{
+			if (ipv6_accept_ra(ifp->idev) && 0 == ifp->idev->cnf.disable_ipv6)
+			{
+				if (ipv6_addr_type(&ifp->addr) & IPV6_ADDR_LINKLOCAL)
+				{
+					in6_dev_hold(i6dev);
+					in6_ifa_hold(ifp);
+					read_unlock_bh(&i6dev->lock);
+					ndisc_send_rs(i6dev->dev,&ifp->addr, &in6addr_linklocal_allrouters);
+					in6_ifa_put(ifp);
+					in6_dev_put(i6dev);
+					return 0;
+				}
+			}
+		}
+		read_unlock_bh(&i6dev->lock);
+		return 0;
+	}
+	return ret;
+}
+
+#endif /* CONFIG_TP_IMAGE */
+
+
 static
 void addrconf_set_nopolicy(struct rt6_info *rt, int action)
 {
@@ -6784,6 +6873,51 @@ static const struct ctl_table addrconf_sysctl[] = {
 		.mode		= 0644,
 		.proc_handler	= proc_dointvec,
 	},
+#ifdef CONFIG_TP_IMAGE	
+#ifdef IPV6_EXPORT_NDISC_MOBIT
+	{
+		.procname	=	"ndisc_mbit",
+		.data			=		&ipv6_devconf.ndisc_mbit,
+		.maxlen 		=		sizeof(int),
+		.mode			=		0644,
+		.proc_handler	= proc_dointvec
+	},
+	{
+		.procname	=	"ndisc_obit",
+		.data			=		&ipv6_devconf.ndisc_obit,
+		.maxlen 		=		sizeof(int),
+		.mode			=		0644,
+		.proc_handler	= proc_dointvec
+	},
+#endif		
+#ifdef IPV6_EXPORT_DEFAULT_GATEWAY
+	{
+		.procname	= "default_gateway",
+		.data		= &ipv6_devconf.default_gateway,
+		.maxlen 	= 64,
+		.mode		= 0444,
+		.proc_handler	= proc_dostring,
+	},
+#endif
+#ifdef IPV6_EXPORT_ADDRCONF_SLAAC_ADDR
+	{
+		.procname	= "slaac_addr",
+		.data		= &ipv6_devconf.slaac_addr,
+		.maxlen 	= 40,
+		.mode		= 0644,
+		.proc_handler	= proc_dostring,
+	},
+#endif	
+#ifdef IPV6_EXPORT_ADDRCONF_SEND_RS
+	{
+		.procname		= "sendrs",
+		.data			= &ipv6_devconf.sendrs,
+		.maxlen 		= sizeof(int),
+		.mode			= 0644,
+		.proc_handler	= addrconf_sendrs,
+	},
+#endif			
+#endif /* CONFIG_TP_IMAGE */
 	{
 		.procname	= "ignore_routes_with_linkdown",
 		.data		= &ipv6_devconf.ignore_routes_with_linkdown,

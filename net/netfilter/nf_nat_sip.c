@@ -608,17 +608,17 @@ static unsigned int nf_nat_sdp_media(struct sk_buff *skb, unsigned int protoff,
 
 		rtp_exp->tuple.dst.u.udp.port = htons(port);
 		ret = nf_ct_expect_related(rtp_exp,
-					   NF_CT_EXP_F_SKIP_MASTER);
+					NF_CT_EXP_F_SKIP_MASTER);
 		if (ret == -EBUSY)
 			continue;
-		else if (ret < 0) {
+		else if (ret < 0 && ret != -EALREADY) {
 			port = 0;
 			break;
 		}
 		rtcp_exp->tuple.dst.u.udp.port = htons(port + 1);
 		ret = nf_ct_expect_related(rtcp_exp,
-					   NF_CT_EXP_F_SKIP_MASTER);
-		if (ret == 0)
+					NF_CT_EXP_F_SKIP_MASTER);
+		if (ret == 0 || ret == -EALREADY)
 			break;
 		else if (ret == -EBUSY) {
 			nf_ct_unexpect_related(rtp_exp);

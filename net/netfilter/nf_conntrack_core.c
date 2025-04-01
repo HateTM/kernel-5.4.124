@@ -744,7 +744,13 @@ begin:
 
 		ct = nf_ct_tuplehash_to_ctrack(h);
 		if (nf_ct_is_expired(ct)) {
+/*
+ * Fix nested calls and deadlock issues with shortcut-fe.
+ * Do not destroy entries and notify sfe when checking the conntrack table.
+ */
+#if !defined(CONFIG_TP_IMAGE) || !defined(CONFIG_NF_SHORTCUT_HOOK)
 			nf_ct_gc_expired(ct);
+#endif
 			continue;
 		}
 
@@ -1207,18 +1213,6 @@ static bool gc_worker_can_early_drop(const struct nf_conn *ct)
 	return false;
 }
 
-#define	DAY	(86400 * HZ)
-
-/* Set an arbitrary timeout large enough not to ever expire, this save
- * us a check for the IPS_OFFLOAD_BIT from the packet path via
- * nf_ct_is_expired().
- */
-static void nf_ct_offload_timeout(struct nf_conn *ct)
-{
-	if (nf_ct_expires(ct) < DAY / 2)
-		ct->timeout = nfct_time_stamp + DAY;
-}
-
 static void gc_worker(struct work_struct *work)
 {
 	unsigned int min_interval = max(HZ / GC_MAX_BUCKETS_DIV, 1u);
@@ -1255,10 +1249,8 @@ static void gc_worker(struct work_struct *work)
 			tmp = nf_ct_tuplehash_to_ctrack(h);
 
 			scanned++;
-			if (test_bit(IPS_OFFLOAD_BIT, &tmp->status)) {
-				nf_ct_offload_timeout(tmp);
+			if (test_bit(IPS_OFFLOAD_BIT, &tmp->status))
 				continue;
-			}
 
 			if (nf_ct_is_expired(tmp)) {
 				nf_ct_gc_expired(tmp);
@@ -1372,7 +1364,10 @@ __nf_conntrack_alloc(struct net *net,
 	ct = kmem_cache_alloc(nf_conntrack_cachep, gfp);
 	if (ct == NULL)
 		goto out;
-
+		
+#if defined(CONFIG_TP_IMAGE)
+		ct->wportal_flag = 0;
+#endif
 	spin_lock_init(&ct->lock);
 	ct->tuplehash[IP_CT_DIR_ORIGINAL].tuple = *orig;
 	ct->tuplehash[IP_CT_DIR_ORIGINAL].hnnode.pprev = NULL;
@@ -1720,7 +1715,21 @@ repeat:
 	if (!ct) {
 		/* Not valid part of a connection */
 		NF_CT_STAT_INC_ATOMIC(state->net, invalid);
+#ifdef CONFIG_TP_IMAGE
+		/* Add by HYY: accept IPv6 packets, 03May12 */
+		if (NFPROTO_IPV6 == state->pf) 
+		{
+			ret = NF_ACCEPT;
+			goto out;
+		}
+	
+		/* Modify by yangxv from WR841N, 2008.09.11
+		 * We are a NAT Router 
+		 */ 	
+		ret = NF_DROP;
+#else
 		ret = NF_ACCEPT;
+#endif
 		goto out;
 	}
 
@@ -2606,6 +2615,9 @@ int nf_conntrack_init_net(struct net *net)
 	nf_conntrack_helper_pernet_init(net);
 	nf_conntrack_proto_pernet_init(net);
 
+#ifdef CONFIG_NF_CONNTRACK_CHAIN_EVENTS
+	ATOMIC_INIT_NOTIFIER_HEAD(&net->ct.nf_conntrack_chain);
+#endif
 	return 0;
 
 err_expect:

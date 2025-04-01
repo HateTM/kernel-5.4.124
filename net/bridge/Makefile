@@ -25,3 +25,9 @@ bridge-$(CONFIG_BRIDGE_VLAN_FILTERING) += br_vlan.o br_vlan_tunnel.o
 bridge-$(CONFIG_NET_SWITCHDEV) += br_switchdev.o
 
 obj-$(CONFIG_NETFILTER) += netfilter/
+
+bridge-$(CONFIG_BRIDGE_VLAN_TP) += br_vlan_tp.o
+
+ifeq ($(strip $(CONFIG_TP_HYFI_BRIDGE)),y)
+EXTRA_CFLAGS += -DCONFIG_TP_HYFI_BRIDGE
+endif

@@ -161,6 +161,8 @@ static int ip6mr_rule_action(struct fib_rule *rule, struct flowi *flp,
 		return -ENETUNREACH;
 	case FR_ACT_PROHIBIT:
 		return -EACCES;
+	case FR_ACT_POLICY_FAILED:
+		return -EACCES;
 	case FR_ACT_BLACKHOLE:
 	default:
 		return -EINVAL;
@@ -989,7 +991,11 @@ static struct mfc6_cache *ip6mr_cache_alloc_unres(void)
 	if (!c)
 		return NULL;
 	skb_queue_head_init(&c->_c.mfc_un.unres.unresolved);
+#ifdef CONFIG_TP_IMAGE
+	c->_c.mfc_un.unres.expires = jiffies + 1 * HZ;
+#else
 	c->_c.mfc_un.unres.expires = jiffies + 10 * HZ;
+#endif
 	return c;
 }
 
@@ -2133,6 +2139,18 @@ static void ip6_mr_forward(struct net *net, struct mr_table *mrt,
 forward:
 	mrt->vif_table[vif].pkt_in++;
 	mrt->vif_table[vif].bytes_in += skb->len;
+
+#if defined(CONFIG_TP_IMAGE)
+		if( ipv6_hdr(skb)->hop_limit <= 1 )
+		{
+			/* prefix match */
+			if(strncmp(skb->dev->name, "br-lan", strlen("br-lan")))
+			{
+				ipv6_hdr(skb)->hop_limit = 128; /* set ttl back to 128 */
+			}
+		}
+#endif
+
 
 	/*
 	 *	Forward the frame

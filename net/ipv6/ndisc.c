@@ -1259,6 +1259,13 @@ static void ndisc_router_discovery(struct sk_buff *skb)
 
 	if (old_if_flags != in6_dev->if_flags)
 		send_ifinfo_notify = true;
+		
+#ifdef CONFIG_TP_IMAGE	  
+#ifdef IPV6_EXPORT_NDISC_MOBIT
+	in6_dev->cnf.ndisc_mbit = ra_msg->icmph.icmp6_addrconf_managed ? 1 : 0;
+	in6_dev->cnf.ndisc_obit = ra_msg->icmph.icmp6_addrconf_other ? 1 : 0;
+#endif
+#endif /* CONFIG_TP_IMAGE */
 
 	if (!in6_dev->cnf.accept_ra_defrtr) {
 		ND_PRINTK(2, info,
@@ -1320,6 +1327,14 @@ static void ndisc_router_discovery(struct sk_buff *skb)
 				  __func__);
 			return;
 		}
+#ifdef CONFIG_TP_IMAGE
+#ifdef IPV6_EXPORT_DEFAULT_GATEWAY
+		else{
+			printk("%s get default gateway\n",skb->dev->name);
+			sprintf(in6_dev->cnf.default_gateway, "%pI6", &(this_cpu_read(*rt->fib6_nh->rt6i_pcpu)->rt6i_gateway));
+		}
+#endif
+#endif /* CONFIG_TP_IMAGE*/
 
 		neigh = ip6_neigh_lookup(&rt->fib6_nh->fib_nh_gw6,
 					 rt->fib6_nh->fib_nh_dev, NULL,

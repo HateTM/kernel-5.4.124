@@ -32,7 +32,15 @@
 
 #define NETLINK_INET_DIAG	NETLINK_SOCK_DIAG
 
-#define MAX_LINKS 32		
+/* TP_IMAGE */
+#define NETLINK_DHCP_HOOK       33
+#define NETLINK_IPTV            34
+#define NETLINK_WPORTAL     35
+#define NETLINK_URL_CLASS       36 /* add by wanghao */
+#define NETLINK_BLOCK_RULE      37 /* add by wanghao */
+
+#define MAX_LINKS 64 /* change by TP_IMAGE from 32 to 64 */
+/* end TP_IMAGE */
 
 struct sockaddr_nl {
 	__kernel_sa_family_t	nl_family;	/* AF_NETLINK	*/

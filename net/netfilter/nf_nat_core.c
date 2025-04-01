@@ -27,14 +27,24 @@
 
 #include "nf_internals.h"
 
-static spinlock_t nf_nat_locks[CONNTRACK_LOCKS];
-
 static DEFINE_MUTEX(nf_nat_proto_mutex);
 static unsigned int nat_net_id __read_mostly;
 
+#ifdef CONFIG_TP_IMAGE
+spinlock_t nf_nat_locks[CONNTRACK_LOCKS] __read_mostly;
+struct hlist_head *nf_nat_bysource __read_mostly;
+unsigned int nf_nat_htable_size __read_mostly;
+unsigned int nf_nat_hash_rnd __read_mostly;
+EXPORT_SYMBOL(nf_nat_locks);
+EXPORT_SYMBOL(nf_nat_bysource);
+EXPORT_SYMBOL(nf_nat_htable_size);
+EXPORT_SYMBOL(nf_nat_hash_rnd);
+#else
+spinlock_t nf_nat_locks[CONNTRACK_LOCKS];
 static struct hlist_head *nf_nat_bysource __read_mostly;
 static unsigned int nf_nat_htable_size __read_mostly;
 static unsigned int nf_nat_hash_rnd __read_mostly;
+#endif
 
 struct nf_nat_lookup_hook_priv {
 	struct nf_hook_entries __rcu *entries;
@@ -201,7 +211,7 @@ hash_by_src(const struct net *n, const struct nf_conntrack_tuple *tuple)
 }
 
 /* Is this tuple already taken? (not by us) */
-static int
+int
 nf_nat_used_tuple(const struct nf_conntrack_tuple *tuple,
 		  const struct nf_conn *ignored_conntrack)
 {
@@ -216,8 +226,9 @@ nf_nat_used_tuple(const struct nf_conntrack_tuple *tuple,
 	nf_ct_invert_tuple(&reply, tuple);
 	return nf_conntrack_tuple_taken(&reply, ignored_conntrack);
 }
+EXPORT_SYMBOL(nf_nat_used_tuple);
 
-static bool nf_nat_inet_in_range(const struct nf_conntrack_tuple *t,
+bool nf_nat_inet_in_range(const struct nf_conntrack_tuple *t,
 				 const struct nf_nat_range2 *range)
 {
 	if (t->src.l3num == NFPROTO_IPV4)
@@ -227,9 +238,10 @@ static bool nf_nat_inet_in_range(const struct nf_conntrack_tuple *t,
 	return ipv6_addr_cmp(&t->src.u3.in6, &range->min_addr.in6) >= 0 &&
 	       ipv6_addr_cmp(&t->src.u3.in6, &range->max_addr.in6) <= 0;
 }
+EXPORT_SYMBOL(nf_nat_inet_in_range);
 
 /* Is the manipable part of the tuple between min and max incl? */
-static bool l4proto_in_range(const struct nf_conntrack_tuple *tuple,
+bool l4proto_in_range(const struct nf_conntrack_tuple *tuple,
 			     enum nf_nat_manip_type maniptype,
 			     const union nf_conntrack_man_proto *min,
 			     const union nf_conntrack_man_proto *max)
@@ -258,6 +270,7 @@ static bool l4proto_in_range(const struct nf_conntrack_tuple *tuple,
 		return true;
 	}
 }
+EXPORT_SYMBOL(l4proto_in_range);
 
 /* If we source map this tuple so reply looks like reply_tuple, will
  * that meet the constraints of range.

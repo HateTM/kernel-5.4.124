@@ -4,6 +4,24 @@
 
 #include <uapi/linux/ipv6.h>
 
+#ifdef CONFIG_TP_IMAGE
+#ifndef IPV6_EXPORT_NDISC_MOBIT
+#define IPV6_EXPORT_NDISC_MOBIT
+#endif
+
+#ifndef IPV6_EXPORT_DEFAULT_GATEWAY
+#define IPV6_EXPORT_DEFAULT_GATEWAY
+#endif
+
+#ifndef IPV6_EXPORT_ADDRCONF_SLAAC_ADDR
+#define IPV6_EXPORT_ADDRCONF_SLAAC_ADDR
+#endif
+
+#ifndef IPV6_EXPORT_ADDRCONF_SEND_RS
+#define IPV6_EXPORT_ADDRCONF_SEND_RS
+#endif
+#endif /*CONFIG_TP_IMAGE*/
+
 #define ipv6_optlen(p)  (((p)->hdrlen+1) << 3)
 #define ipv6_authlen(p) (((p)->hdrlen+2) << 2)
 /*
@@ -74,6 +92,21 @@ struct ipv6_devconf {
 	__u32		addr_gen_mode;
 	__s32		disable_policy;
 	__s32           ndisc_tclass;
+#ifdef CONFIG_TP_IMAGE
+#ifdef IPV6_EXPORT_NDISC_MOBIT
+		__s32			ndisc_mbit;
+		__s32			ndisc_obit;
+#endif
+#ifdef IPV6_EXPORT_DEFAULT_GATEWAY
+		u8		default_gateway[64];
+#endif
+#ifdef IPV6_EXPORT_ADDRCONF_SLAAC_ADDR
+		u8		slaac_addr[40];
+#endif
+#ifdef IPV6_EXPORT_ADDRCONF_SEND_RS
+		   __s32		sendrs;
+#endif
+#endif /*CONFIG_TP_IMAGE*/	
 
 	struct ctl_table_header *sysctl_header;
 };

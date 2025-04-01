@@ -158,6 +158,11 @@ struct xhci_hcd_mtk {
 	struct regmap *uwk;
 	u32 uwk_reg_base;
 	u32 uwk_vers;
+
+#ifdef CONFIG_USB_XHCI_MTK_DEBUGFS
+	int test_mode;
+	void __iomem *ip_base;
+#endif
 };
 
 static inline struct xhci_hcd_mtk *hcd_to_mtk(struct usb_hcd *hcd)

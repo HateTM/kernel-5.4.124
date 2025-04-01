@@ -42,6 +42,12 @@ config MDIO_BCM_IPROC
 	  This module provides a driver for the MDIO busses found in the
 	  Broadcom iProc SoC's.
 
+config RTL8367S_GSW
+	tristate "rtl8367 Gigabit Switch support for mt7622"
+	depends on NET_VENDOR_MEDIATEK
+	help
+	  This driver supports rtl8367s in mt7622
+
 config MDIO_BCM_UNIMAC
 	tristate "Broadcom UniMAC MDIO bus controller"
 	depends on HAS_IOMEM
@@ -250,6 +256,87 @@ config LED_TRIGGER_PHY
 		for any speed known to the PHY.
 
 
+comment "Switch configuration API + drivers"
+
+config SWCONFIG
+	tristate "Switch configuration API"
+	---help---
+	  Switch configuration API using netlink. This allows
+	  you to configure the VLAN features of certain switches.
+
+config SWCONFIG_LEDS
+	bool "Switch LED trigger support"
+	depends on (SWCONFIG && LEDS_TRIGGERS)
+
+config ADM6996_PHY
+	tristate "Driver for ADM6996 switches"
+	select SWCONFIG
+	---help---
+	  Currently supports the ADM6996FC and ADM6996M switches.
+	  Support for FC is very limited.
+
+config AR8216_PHY
+	tristate "Driver for Atheros AR8216 switches"
+	select ETHERNET_PACKET_MANGLE
+	select SWCONFIG
+
+config AR8216_PHY_LEDS
+	bool "Atheros AR8216 switch LED support"
+	depends on (AR8216_PHY && LEDS_CLASS)
+
+source "drivers/net/phy/b53/Kconfig"
+
+config IP17XX_PHY
+	tristate "Driver for IC+ IP17xx switches"
+	select SWCONFIG
+
+config MVSWITCH_PHY
+	tristate "Driver for Marvell 88E6060 switches"
+	select ETHERNET_PACKET_MANGLE
+
+config PSB6970_PHY
+	tristate "Lantiq XWAY Tantos (PSB6970) Ethernet switch"
+	select SWCONFIG
+	select ETHERNET_PACKET_MANGLE
+
+config RTL8306_PHY
+	tristate "Driver for Realtek RTL8306S switches"
+	select SWCONFIG
+
+config RTL8366_SMI
+	tristate "Driver for the RTL8366 SMI interface"
+	depends on GPIOLIB
+	---help---
+	  This module implements the SMI interface protocol which is used
+	  by some RTL8366 ethernet switch devices via the generic GPIO API.
+
+if RTL8366_SMI
+
+config RTL8366_SMI_DEBUG_FS
+	bool "RTL8366 SMI interface debugfs support"
+        depends on DEBUG_FS
+        default n
+
+config RTL8366S_PHY
+	tristate "Driver for the Realtek RTL8366S switch"
+	select SWCONFIG
+
+config RTL8366RB_PHY
+	tristate "Driver for the Realtek RTL8366RB switch"
+	select SWCONFIG
+
+config RTL8367_PHY
+	tristate "Driver for the Realtek RTL8367R/M switches"
+	select SWCONFIG
+
+config RTL8367B_PHY
+	tristate "Driver fot the Realtek RTL8367R-VB switch"
+	select SWCONFIG
+
+endif # RTL8366_SMI
+
+source "drivers/net/phy/mtk/mt753x/Kconfig"
+
 comment "MII PHY device drivers"
 
 config SFP
@@ -330,6 +417,12 @@ config BROADCOM_PHY
 	  Currently supports the BCM5411, BCM5421, BCM5461, BCM54616S, BCM5464,
 	  BCM5481, BCM54810 and BCM5482 PHYs.
 
+config BCM84881_PHY
+	tristate "Broadcom BCM84881 PHY"
+	depends on PHYLIB
+	---help---
+	  Support the Broadcom BCM84881 PHY.
+
 config CICADA_PHY
 	tristate "Cicada PHYs"
 	---help---
@@ -374,6 +467,11 @@ config FIXED_PHY
 	  PHYs that are not connected to the real MDIO bus.
 
 	  Currently tested with mpc866ads and mpc8349e-mitx.
+
+config GPY211_PHY
+	tristate "GPY211 PHY"
+	---help---
+	  Supports the Intel GPY211 PHY with rate adaption.
 
 config ICPLUS_PHY
 	tristate "ICPlus PHYs"

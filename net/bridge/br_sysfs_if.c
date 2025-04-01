@@ -252,6 +252,25 @@ BRPORT_ATTR_FLAG(multicast_fast_leave, BR_MULTICAST_FAST_LEAVE);
 BRPORT_ATTR_FLAG(multicast_to_unicast, BR_MULTICAST_TO_UNICAST);
 #endif
 
+#ifdef CONFIG_NET_SWITCHDEV
+static ssize_t show_offload_fwd_mask(struct net_bridge_port *p, char *buf)
+{
+	return sprintf(buf, "%d\n", p->offload_fwd_mark);
+}
+
+static int store_offload_fwd_mask(struct net_bridge_port *p,
+				unsigned long v)
+{
+	p->offload_fwd_mark = v;
+
+	return 0;
+}
+
+static BRPORT_ATTR(offload_fwd_mask, 0644, show_offload_fwd_mask,
+		   store_offload_fwd_mask);
+
+#endif
+
 static const struct brport_attribute *brport_attrs[] = {
 	&brport_attr_path_cost,
 	&brport_attr_priority,
@@ -286,6 +305,9 @@ static const struct brport_attribute *brport_attrs[] = {
 	&brport_attr_neigh_suppress,
 	&brport_attr_isolated,
 	&brport_attr_backup_port,
+#ifdef CONFIG_NET_SWITCHDEV
+	&brport_attr_offload_fwd_mask,
+#endif
 	NULL
 };
 

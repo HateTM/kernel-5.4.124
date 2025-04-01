@@ -60,6 +60,7 @@
 #include <linux/prefetch.h>
 #include <linux/if_vlan.h>
 #include <linux/mpls.h>
+#include <linux/if.h>
 
 #include <net/protocol.h>
 #include <net/dst.h>
@@ -68,6 +69,7 @@
 #include <net/ip6_checksum.h>
 #include <net/xfrm.h>
 #include <net/mpls.h>
+#include <net/ra_nat.h>
 
 #include <linux/uaccess.h>
 #include <trace/events/skb.h>
@@ -85,6 +87,13 @@ static struct kmem_cache *skbuff_ext_cache __ro_after_init;
 #endif
 int sysctl_max_skb_frags __read_mostly = MAX_SKB_FRAGS;
 EXPORT_SYMBOL(sysctl_max_skb_frags);
+
+#ifdef CONFIG_TP_IMAGE
+#if defined(CONFIG_VLAN_MULTICAST_IPTV) || defined(CONFIG_VLAN_SOFT_SWITCH_PORT_TAGGING)
+const struct tp_iptv_hooks *iptv_hooks = NULL;
+EXPORT_SYMBOL_GPL(iptv_hooks);
+#endif
+#endif
 
 /**
  *	skb_panic - private function for out-of-line support
@@ -548,6 +557,22 @@ skb_fail:
 	return skb;
 }
 EXPORT_SYMBOL(__napi_alloc_skb);
+
+struct sk_buff *__netdev_alloc_skb_ip_align(struct net_device *dev,
+		unsigned int length, gfp_t gfp)
+{
+	struct sk_buff *skb = __netdev_alloc_skb(dev, length + NET_IP_ALIGN, gfp);
+
+#ifdef CONFIG_ETHERNET_PACKET_MANGLE
+	if (dev && (dev->priv_flags & IFF_NO_IP_ALIGN))
+		return skb;
+#endif
+
+	if (NET_IP_ALIGN && skb)
+		skb_reserve(skb, NET_IP_ALIGN);
+	return skb;
+}
+EXPORT_SYMBOL(__netdev_alloc_skb_ip_align);
 
 void skb_add_rx_frag(struct sk_buff *skb, int i, struct page *page, int off,
 		     int size, unsigned int truesize)
@@ -1648,6 +1673,9 @@ int pskb_expand_head(struct sk_buff *skb, int nhead, int ntail,
 	memcpy((struct skb_shared_info *)(data + size),
 	       skb_shinfo(skb),
 	       offsetof(struct skb_shared_info, frags[skb_shinfo(skb)->nr_frags]));
+
+	/*headroom copy*/
+	memcpy(data, skb->head, FOE_INFO_LEN);
 
 	/*
 	 * if shinfo is shared we must drop the old head gracefully, but if it
@@ -5335,6 +5363,12 @@ struct sk_buff *skb_vlan_untag(struct sk_buff *skb)
 {
 	struct vlan_hdr *vhdr;
 	u16 vlan_tci;
+#ifdef CONFIG_TP_IMAGE
+#ifdef CONFIG_VLAN_MULTICAST_IPTV
+	u16 tmp_tci;
+	const struct tp_iptv_hooks *hooks;
+#endif
+#endif/*CONFIG_TP_IMAGE*/
 
 	if (unlikely(skb_vlan_tag_present(skb))) {
 		/* vlan_tci is already set-up so leave this for another time */
@@ -5350,6 +5384,17 @@ struct sk_buff *skb_vlan_untag(struct sk_buff *skb)
 
 	vhdr = (struct vlan_hdr *)skb->data;
 	vlan_tci = ntohs(vhdr->h_vlan_TCI);
+#ifdef CONFIG_TP_IMAGE
+#ifdef CONFIG_VLAN_MULTICAST_IPTV
+	rcu_read_lock();
+	hooks = rcu_dereference(iptv_hooks);
+	if (hooks) {
+		tmp_tci  = hooks->iptv_handle_frame_hook(skb, vlan_tci, 0);
+		vlan_tci = tmp_tci?tmp_tci:vlan_tci;
+	}
+	rcu_read_unlock();
+#endif
+#endif/*CONFIG_TP_IMAGE*/
 	__vlan_hwaccel_put_tag(skb, skb->protocol, vlan_tci);
 
 	skb_pull_rcsum(skb, VLAN_HLEN);

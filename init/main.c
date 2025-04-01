@@ -127,6 +127,12 @@ EXPORT_SYMBOL(system_state);
 #define MAX_INIT_ARGS CONFIG_INIT_ENV_ARG_LIMIT
 #define MAX_INIT_ENVS CONFIG_INIT_ENV_ARG_LIMIT
 
+#ifdef CONFIG_CMD_TEST_MODE
+bool test_mode_enable = false;
+EXPORT_SYMBOL(test_mode_enable);
+#endif
+
+
 extern void time_init(void);
 /* Default late time init is NULL. archs can override this later. */
 void (*__initdata late_time_init)(void);
@@ -367,6 +373,29 @@ static inline void setup_nr_cpu_ids(void) { }
 static inline void smp_prepare_cpus(unsigned int maxcpus) { }
 #endif
 
+#ifdef CONFIG_MANGLE_BOOTARGS
+static void __init mangle_bootargs(char *command_line)
+{
+	char *rootdev;
+	char *rootfs;
+
+	rootdev = strstr(command_line, "root=/dev/mtdblock");
+
+	if (rootdev)
+		strncpy(rootdev, "mangled_rootblock=", 18);
+
+	rootfs = strstr(command_line, "rootfstype");
+
+	if (rootfs)
+		strncpy(rootfs, "mangled_fs", 10);
+
+}
+#else
+static void __init mangle_bootargs(char *command_line)
+{
+}
+#endif
+
 /*
  * We need to store the untouched command line for future reference.
  * We also need to store the touched command line since the parameter
@@ -597,6 +626,7 @@ asmlinkage __visible void __init start_kernel(void)
 	pr_notice("%s", linux_banner);
 	early_security_init();
 	setup_arch(&command_line);
+	mangle_bootargs(command_line);
 	setup_command_line(command_line);
 	setup_nr_cpu_ids();
 	setup_per_cpu_areas();
@@ -607,6 +637,13 @@ asmlinkage __visible void __init start_kernel(void)
 	page_alloc_init();
 
 	pr_notice("Kernel command line: %s\n", boot_command_line);
+
+#ifdef CONFIG_CMD_TEST_MODE
+	if (strstr(boot_command_line, "test_mode=enable")){
+		test_mode_enable = true;
+	}
+#endif
+
 	/* parameters may set static keys */
 	jump_label_init();
 	parse_early_param();

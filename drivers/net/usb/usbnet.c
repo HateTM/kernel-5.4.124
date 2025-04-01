@@ -387,6 +387,13 @@ int usbnet_change_mtu (struct net_device *net, int new_mtu)
 		return -EDOM;
 	net->mtu = new_mtu;
 
+#if defined(CONFIG_TP_IMAGE)
+	printk("[usbnet]usbnet change mtu:%d\n",new_mtu);
+	/*The max value is 1492*/
+	if (new_mtu > 1492)
+		return 0;
+#endif
+
 	dev->hard_mtu = net->mtu + net->hard_header_len;
 	if (dev->rx_urb_size == old_hard_mtu) {
 		dev->rx_urb_size = dev->hard_mtu;
@@ -1737,10 +1744,18 @@ usbnet_probe (struct usb_interface *udev, const struct usb_device_id *prod)
 		if ((dev->driver_info->flags & FLAG_ETHER) != 0 &&
 		    ((dev->driver_info->flags & FLAG_POINTTOPOINT) == 0 ||
 		     (net->dev_addr [0] & 0x02) == 0))
+#if defined(CONFIG_TP_IMAGE)
+			strcpy (net->name, "usb%d");
+#else
 			strcpy (net->name, "eth%d");
+#endif
 		/* WLAN devices should always be named "wlan%d" */
 		if ((dev->driver_info->flags & FLAG_WLAN) != 0)
+#if defined(CONFIG_TP_IMAGE)
+			strcpy (net->name, "usb%d");
+#else
 			strcpy(net->name, "wlan%d");
+#endif
 		/* WWAN devices should always be named "wwan%d" */
 		if ((dev->driver_info->flags & FLAG_WWAN) != 0)
 			strcpy(net->name, "wwan%d");

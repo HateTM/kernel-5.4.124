@@ -16,6 +16,9 @@
 #include <net/net_namespace.h>
 #include <linux/uaccess.h>
 #include "br_private.h"
+#if defined(CONFIG_TP_IMAGE) && defined(CONFIG_BRIDGE_VLAN_TP)
+#include "br_vlan_tp.h"
+#endif
 
 static int get_bridge_ifindices(struct net *net, int *indices, int num)
 {
@@ -101,6 +104,29 @@ static int add_del_if(struct net_bridge *br, int ifindex, int isadd)
 	return ret;
 }
 
+#if defined(CONFIG_TP_IMAGE) && defined(CONFIG_BRIDGE_VLAN_TP)
+static int set_vlan_info(struct net_bridge *br, int ifindex, int value, int pos, int type)
+{
+	struct net_device *dev;
+	int ret;
+
+	if (!capable(CAP_NET_ADMIN))
+		return -EPERM;
+
+	dev = __dev_get_by_index(dev_net(br->dev), ifindex);
+	if (dev == NULL)
+		return -EINVAL;
+
+	BR_VLAN_PRINT("value:%d", value);
+
+	spin_lock_bh(&br->lock);
+	ret = br_set_if_vlan(br, dev, value);
+	spin_unlock_bh(&br->lock);
+
+	return ret;
+}
+#endif /* defined(CONFIG_TP_IMAGE) && defined(CONFIG_BRIDGE_VLAN_TP) */
+
 /*
  * Legacy ioctl's through SIOCDEVPRIVATE
  * This interface is deprecated because it was too difficult to
@@ -120,6 +146,26 @@ static int old_dev_ioctl(struct net_device *dev, struct ifreq *rq, int cmd)
 	case BRCTL_ADD_IF:
 	case BRCTL_DEL_IF:
 		return add_del_if(br, args[1], args[0] == BRCTL_ADD_IF);
+		
+#if defined(CONFIG_TP_IMAGE) && defined(CONFIG_BRIDGE_VLAN_TP)
+	case BRCTL_SET_IF_VLAN:
+	case BRCTL_SET_IF_TAG:
+	{
+		BR_VLAN_PRINT("1:key:%ld br:%s if:%ld arg:%ld pos:%ld\n", args[0], rq->ifr_name, args[1], args[2], args[3]);
+		int ret;
+		ret = set_vlan_info(br, args[1], args[2], args[3], args[0]);
+		BR_VLAN_PRINT("return:%d",ret);
+		return ret;
+	}
+
+	case BRCTL_SHOW_VLAN:
+	{	
+		rcu_read_lock();
+		br_show_vlan_map(br);
+		rcu_read_unlock();
+		return 0;
+	}
+#endif
 
 	case BRCTL_GET_BRIDGE_INFO:
 	{

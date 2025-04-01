@@ -73,6 +73,11 @@
 #include <linux/proc_fs.h>
 #include <linux/seq_file.h>
 
+#if IS_ENABLED(CONFIG_NF_FLOW_TABLE)
+#include <linux/netfilter.h>
+#include <net/netfilter/nf_flow_table.h>
+#endif
+
 #include <linux/nsproxy.h>
 #include <net/net_namespace.h>
 #include <net/netns/generic.h>
@@ -103,6 +108,14 @@ struct pppoe_net {
 	struct pppox_sock *hash_table[PPPOE_HASH_SIZE];
 	rwlock_t hash_lock;
 };
+
+#if (defined CONFIG_TP_IMAGE) && (defined CONFIG_SFE_PPP_HEADER)
+int (*sfe_ppp_pppoeParsePtr)(struct sk_buff *skb) __rcu __read_mostly;
+EXPORT_SYMBOL_GPL(sfe_ppp_pppoeParsePtr);
+
+int (*sfe_ppp_pppoev6ParsePtr)(struct sk_buff *skb) __rcu __read_mostly;
+EXPORT_SYMBOL_GPL(sfe_ppp_pppoev6ParsePtr);
+#endif
 
 /*
  * PPPoE could be in the following stages:
@@ -423,6 +436,12 @@ static int pppoe_rcv(struct sk_buff *skb, struct net_device *dev,
 	skb = skb_share_check(skb, GFP_ATOMIC);
 	if (!skb)
 		goto out;
+		
+#ifdef CONFIG_TP_IMAGE
+		if (skb->pkt_type == PACKET_OTHERHOST)
+			goto drop;
+#endif /*CONFIG_TP_IMAGE*/
+
 
 	if (skb_mac_header_len(skb) < ETH_HLEN)
 		goto drop;
@@ -487,6 +506,10 @@ static int pppoe_disc_rcv(struct sk_buff *skb, struct net_device *dev,
 	struct pppoe_hdr *ph;
 	struct pppox_sock *po;
 	struct pppoe_net *pn;
+#ifdef CONFIG_TP_IMAGE
+	int need_drop = 1;
+#endif /* CONFIG_TP_IMAGE */
+
 
 	skb = skb_share_check(skb, GFP_ATOMIC);
 	if (!skb)
@@ -505,10 +528,23 @@ static int pppoe_disc_rcv(struct sk_buff *skb, struct net_device *dev,
 	pn = pppoe_pernet(dev_net(dev));
 	po = get_item(pn, ph->sid, eth_hdr(skb)->h_source, dev->ifindex);
 	if (po)
+	{
+#ifdef CONFIG_TP_IMAGE
+		/* send PADT to pppd to alert server has down 
+                 */
+		if (sk_pppox(po)->sk_state & PPPOX_BOUND) {
+                	ppp_input(&po->chan, skb);
+                	need_drop = 0;
+		}
+#endif /* CONFIG_TP_IMAGE */		
 		if (!schedule_work(&po->proto.pppoe.padt_work))
 			sock_put(sk_pppox(po));
+	}
 
 abort:
+#ifdef CONFIG_TP_IMAGE
+	if (need_drop == 1)
+#endif /* CONFIG_TP_IMAGE */
 	kfree_skb(skb);
 out:
 	return NET_RX_SUCCESS; /* Lies... :-) */
@@ -917,7 +953,10 @@ static int __pppoe_xmit(struct sock *sk, struct sk_buff *skb)
 	struct net_device *dev = po->pppoe_dev;
 	struct pppoe_hdr *ph;
 	int data_len = skb->len;
-
+#if (defined CONFIG_TP_IMAGE) && (defined CONFIG_SFE_PPP_HEADER)
+	int (*ppp_parse)(struct sk_buff *skb) = NULL;
+	int (*pppv6_parse)(struct sk_buff *skb) = NULL;
+#endif
 	/* The higher-level PPP code (ppp_unregister_channel()) ensures the PPP
 	 * xmit operations conclude prior to an unregistration call.  Thus
 	 * sk->sk_state cannot change, so we don't need to do lock_sock().
@@ -954,6 +993,20 @@ static int __pppoe_xmit(struct sock *sk, struct sk_buff *skb)
 	dev_hard_header(skb, dev, ETH_P_PPP_SES,
 			po->pppoe_pa.remote, NULL, data_len);
 
+#if (defined CONFIG_TP_IMAGE) && (defined CONFIG_SFE_PPP_HEADER)
+	rcu_read_lock();
+	ppp_parse = rcu_dereference(sfe_ppp_pppoeParsePtr);
+	if (ppp_parse) {
+		ppp_parse(skb);
+	}
+
+	pppv6_parse = rcu_dereference(sfe_ppp_pppoev6ParsePtr);
+	if (pppv6_parse) {
+		pppv6_parse(skb);
+	}
+	rcu_read_unlock();
+#endif
+	
 	dev_queue_xmit(skb);
 	return 1;
 
@@ -974,8 +1027,36 @@ static int pppoe_xmit(struct ppp_channel *chan, struct sk_buff *skb)
 	return __pppoe_xmit(sk, skb);
 }
 
+#if IS_ENABLED(CONFIG_NF_FLOW_TABLE)
+static int pppoe_flow_offload_check(struct ppp_channel *chan,
+				    struct flow_offload_hw_path *path)
+{
+	struct sock *sk = (struct sock *)chan->private;
+	struct pppox_sock *po = pppox_sk(sk);
+	struct net_device *dev = po->pppoe_dev;
+
+	if (sock_flag(sk, SOCK_DEAD) ||
+	    !(sk->sk_state & PPPOX_CONNECTED) || !dev)
+		return -ENODEV;
+
+	path->dev = po->pppoe_dev;
+	path->flags |= FLOW_OFFLOAD_PATH_PPPOE;
+	memcpy(path->eth_src, po->pppoe_dev->dev_addr, ETH_ALEN);
+	memcpy(path->eth_dest, po->pppoe_pa.remote, ETH_ALEN);
+	path->pppoe_sid = be16_to_cpu(po->num);
+
+	if (path->dev->netdev_ops->ndo_flow_offload_check)
+		return path->dev->netdev_ops->ndo_flow_offload_check(path);
+
+	return 0;
+}
+#endif /* CONFIG_NF_FLOW_TABLE */
+
 static const struct ppp_channel_ops pppoe_chan_ops = {
 	.start_xmit = pppoe_xmit,
+#if IS_ENABLED(CONFIG_NF_FLOW_TABLE)
+	.flow_offload_check = pppoe_flow_offload_check,
+#endif
 };
 
 static int pppoe_recvmsg(struct socket *sock, struct msghdr *m,

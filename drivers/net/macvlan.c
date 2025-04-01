@@ -33,6 +33,12 @@
 #include <linux/netpoll.h>
 #include <linux/phy.h>
 
+#if (defined CONFIG_TP_IMAGE) && (defined CONFIG_X_TP_VLAN)
+/*add for single-VID-multi-connection by wanghao*/
+#include "../../net/bridge/br_private.h"
+/*add end*/
+#endif
+
 #define MACVLAN_HASH_BITS	8
 #define MACVLAN_HASH_SIZE	(1<<MACVLAN_HASH_BITS)
 #define MACVLAN_BC_QUEUE_LEN	1000
@@ -447,6 +453,13 @@ static rx_handler_result_t macvlan_handle_frame(struct sk_buff **pskb)
 	int ret;
 	rx_handler_result_t handle_res;
 
+#if (defined CONFIG_TP_IMAGE) && (defined CONFIG_X_TP_VLAN)
+/*add for single-VID-multi-connection by wanghao*/
+	struct sk_buff *skb2;
+	int i;
+/*add end*/
+#endif
+
 	/* Packets from dev_loopback_xmit() do not have L2 header, bail out */
 	if (unlikely(skb->pkt_type == PACKET_LOOPBACK))
 		return RX_HANDLER_PASS;
@@ -485,8 +498,16 @@ static rx_handler_result_t macvlan_handle_frame(struct sk_buff **pskb)
 					      struct macvlan_dev, list);
 	else
 		vlan = macvlan_hash_lookup(port, eth->h_dest);
+	
+#if !(defined CONFIG_TP_IMAGE) || !(defined CONFIG_X_TP_VLAN)
 	if (!vlan || vlan->mode == MACVLAN_MODE_SOURCE)
 		return RX_HANDLER_PASS;
+#else
+	if ((vlan != NULL) && (vlan->mode != MACVLAN_MODE_SOURCE))
+	{
+#endif
+
+	// unicast and match macvlan port by dst_mac 
 
 	dev = vlan->dev;
 	if (unlikely(!(dev->flags & IFF_UP))) {
@@ -510,6 +531,67 @@ static rx_handler_result_t macvlan_handle_frame(struct sk_buff **pskb)
 out:
 	macvlan_count_rx(vlan, len, ret == NET_RX_SUCCESS, false);
 	return handle_res;
+
+#if (defined CONFIG_TP_IMAGE) && (defined CONFIG_X_TP_VLAN)
+	}
+	/*
+	 * brief	add for single-VID-multi-connection
+	 * By	wangwenhao, 20May13
+	 */
+	else 
+	{
+		// unicast and match macvlan fail 
+
+		// if dst_mac == lower_dev_mac; deliver skb to lower_dev
+		if (ether_addr_equal_64bits(port->dev->dev_addr, (unsigned char *)eth->h_dest))
+		{
+			return RX_HANDLER_PASS; 
+		}
+
+		// if dst_mac in bridge fdb
+
+		for (i = 0; i < MACVLAN_HASH_SIZE; i++) {
+			hlist_for_each_entry_rcu(vlan, &port->vlan_hash[i], hlist) {
+				dev = vlan->dev;
+				if (br_fdb_test_addr_hook != NULL && br_fdb_test_addr_hook(dev, (unsigned char *)eth->h_dest))
+				{
+					dev->stats.rx_bytes += skb->len + ETH_HLEN;
+					dev->stats.rx_packets++;
+
+					skb->pkt_type = PACKET_HOST;
+					skb->dev = dev;
+					netif_rx(skb);
+
+					return RX_HANDLER_CONSUMED;
+				}
+			}
+		}
+	}
+
+	// dst_mac macth fail, clone skb to every macvlan 
+	for (i = 0; i < MACVLAN_HASH_SIZE; i++) {
+		hlist_for_each_entry_rcu(vlan, &port->vlan_hash[i], hlist) {
+			dev = vlan->dev;
+
+			skb2 = skb_copy(skb, GFP_ATOMIC);
+			if (NULL == skb2)
+			{
+				continue;
+			}
+			dev->stats.rx_bytes += skb->len + ETH_HLEN;
+			dev->stats.rx_packets++;
+
+			skb2->pkt_type = PACKET_HOST;
+			skb2->dev = dev;
+
+			netif_rx(skb2);
+		}
+	}
+
+	// dst_mac macth fail, free skb, do not deliver to lower_dev
+	kfree_skb(skb);
+	return RX_HANDLER_CONSUMED;
+#endif
 }
 
 static int macvlan_queue_xmit(struct sk_buff *skb, struct net_device *dev)

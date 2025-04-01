@@ -311,6 +311,12 @@ static const struct stp_proto br_stp_proto = {
 	.rcv	= br_stp_rcv,
 };
 
+#ifdef CONFIG_TP_HYFI_BRIDGE
+	/* Hook for bridge event notifications */
+br_notify_hook_t __rcu *br_notify_hook __read_mostly;
+EXPORT_SYMBOL_GPL(br_notify_hook);
+#endif /* CONFIG_TP_HYFI_BRIDGE */
+
 static int __init br_init(void)
 {
 	int err;
@@ -349,7 +355,7 @@ static int __init br_init(void)
 
 	brioctl_set(br_ioctl_deviceless_stub);
 
-#if IS_ENABLED(CONFIG_ATM_LANE)
+#if IS_ENABLED(CONFIG_ATM_LANE) || (defined CONFIG_X_TP_VLAN)
 	br_fdb_test_addr_hook = br_fdb_test_addr;
 #endif
 
@@ -388,11 +394,17 @@ static void __exit br_deinit(void)
 	rcu_barrier(); /* Wait for completion of call_rcu()'s */
 
 	br_nf_core_fini();
-#if IS_ENABLED(CONFIG_ATM_LANE)
+#if IS_ENABLED(CONFIG_ATM_LANE) || (defined CONFIG_X_TP_VLAN)
 	br_fdb_test_addr_hook = NULL;
 #endif
 	br_fdb_fini();
 }
+
+#ifdef TP_CONFIG_IMAGE
+/* Hook for bridge event notifications */
+br_notify_hook_t __rcu *br_notify_hook __read_mostly;
+EXPORT_SYMBOL_GPL(br_notify_hook);
+#endif
 
 module_init(br_init)
 module_exit(br_deinit)

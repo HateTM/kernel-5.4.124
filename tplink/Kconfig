@@ -1,0 +1,57 @@
+menu "TP-LINK kernel features"
+config TP_IMAGE
+	bool "tplink"
+	default y
+
+config VLAN_MULTICAST_IPTV
+	bool "multicast vlan"
+	depends on TP_IMAGE
+	default n
+
+config VLAN_SOFT_SWITCH_PORT_TAGGING
+	bool "switch port tagging"
+	depends on TP_IMAGE
+	default n
+
+config X_TP_VLAN
+	bool "macvlan for bridge"
+	depends on TP_IMAGE
+	default n
+
+config TP_MTKHNAT_STATS
+	bool 'Hnat traffic flow account'
+	depends on TP_IMAGE
+	default n
+
+config TP_MTKHNAT_CT_SKIP
+	bool 'Hnat do not accel specific ct'
+	depends on TP_IMAGE
+	default n
+
+config SFE_PPP_HEADER
+        bool "kernel support for sfe ppp header build"
+        default n
+        help
+          Say 'y' here if want to enable ppp header building for sfe
+
+config SFE_TUNNEL_HEADER
+        bool "kernel support for sfe tunnel header build"
+        default n
+        help
+          Say 'y' here if want to enable tunnel header building for sfe
+
+config CMD_TEST_MODE
+	bool "Uboot Command support for Test Mode Control"
+	default n
+	help
+	  This option support to set uboot command test_mode 
+
+config TP_FW_DL_MEM_PREMALLOC
+	bool 'FW download use pre-malloc memory in DTS'
+	default n
+
+config TP_HYFI_BRIDGE
+	bool 'Hyfi-bridge support'
+	default n
+
+endmenu

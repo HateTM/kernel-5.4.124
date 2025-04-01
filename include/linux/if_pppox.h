@@ -81,6 +81,15 @@ extern void unregister_pppox_proto(int proto_num);
 extern void pppox_unbind_sock(struct sock *sk);/* delete ppp-channel binding */
 extern int pppox_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg);
 extern int pppox_compat_ioctl(struct socket *sock, unsigned int cmd, unsigned long arg);
+#ifdef CONFIG_TP_IMAGE
+/* Lookup PPTP session info and return PPTP session using dip and peer call id */
+extern int pptp_session_find(struct pptp_opt *opt, __be16 peer_call_id,
+			     __be32 peer_ip_addr);
+
+/* Lookup PPTP session info and return PPTP session using sip, dip and local call id */
+extern int pptp_session_find_by_src_callid(struct pptp_opt *opt, __be16 src_call_id,
+			 __be32 daddr, __be32 saddr);
+#endif /* CONFIG_TP_IMAGE */
 
 #define PPPOEIOCSFWD32    _IOW(0xB1 ,0, compat_size_t)
 

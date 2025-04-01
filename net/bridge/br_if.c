@@ -13,6 +13,7 @@
 #include <linux/netpoll.h>
 #include <linux/ethtool.h>
 #include <linux/if_arp.h>
+#include <linux/device.h>
 #include <linux/module.h>
 #include <linux/init.h>
 #include <linux/rtnetlink.h>
@@ -23,8 +24,170 @@
 #include <linux/if_vlan.h>
 #include <net/switchdev.h>
 #include <net/net_namespace.h>
+#include <linux/if_macvlan.h>
 
 #include "br_private.h"
+
+#if defined(CONFIG_TP_IMAGE) && defined(CONFIG_NET_DSA_MT7530)
+#include "../dsa/dsa_priv.h"
+#endif
+
+#if defined(CONFIG_TP_IMAGE) || defined(CONFIG_TP_HYFI_BRIDGE)
+/* Hook for external forwarding logic */
+br_port_dev_get_hook_t __rcu *br_port_dev_get_hook __read_mostly;
+EXPORT_SYMBOL_GPL(br_port_dev_get_hook);
+#endif
+
+#if defined(CONFIG_TP_IMAGE) && defined(CONFIG_NET_DSA_MT7530)
+
+struct net_device * get_real_dsa_slave(struct net_device *dev)
+{
+	struct net_device *slave = NULL;
+	
+	if (dsa_slave_dev_check(dev))
+		return dev;
+
+	if (is_vlan_dev(dev))
+	{
+		slave = vlan_dev_real_dev(dev);
+	}
+#if defined(CONFIG_X_TP_VLAN)
+	else if (netif_is_macvlan(dev))
+	{
+		slave = macvlan_dev_real_dev(dev);
+	}
+#endif
+	else
+	{
+		return NULL;
+	}
+
+	if (dsa_slave_dev_check(slave))
+	{
+		return slave;
+	}
+	
+	return NULL;
+}
+
+bool is_offlearning_dsa_slave_port(struct net_device * dev)
+{
+	struct net_device *slave = NULL;
+
+	if (is_vlan_dev(dev))
+	{
+		slave = vlan_dev_real_dev(dev);
+	}
+#if defined(CONFIG_X_TP_VLAN)
+	else if (netif_is_macvlan(dev))
+	{
+		slave = macvlan_dev_real_dev(dev);
+	}
+#endif
+
+	if (!slave)
+		return false;
+
+	return (dsa_slave_dev_check(slave));
+}
+
+void port_set_sa_learning(struct dsa_port *dp, bool offlearning)
+{
+	struct dsa_switch *ds = dp->ds;
+
+	if (ds->ops && ds->ops->port_sa_state_set)
+		ds->ops->port_sa_state_set(ds, dp->index, offlearning);
+}
+
+void dsa_port_set_sa(struct net_device * dev, bool offlearning_attr, bool new_change_offlearning_port)
+{
+	struct net_device *slave = get_real_dsa_slave(dev);
+	struct dsa_port *dp;
+	struct dsa_slave_priv *p;
+	int old;
+
+	if (!slave)
+		return;
+
+	dp = dsa_slave_to_port(slave);
+
+	old = dp->offlearning_vif_count;
+
+	if (offlearning_attr)
+	{
+		dp->offlearning_vif_count += (new_change_offlearning_port ? 1 : 0);
+	}
+	else
+	{
+		dp->offlearning_vif_count -= (new_change_offlearning_port ? 1 : 0);
+	}
+
+	if (offlearning_attr)
+	{
+		if (0 == old)
+			port_set_sa_learning(dp, 1);
+	}
+	else
+	{
+		if (0 == dp->offlearning_vif_count)
+			port_set_sa_learning(dp, 0);
+	}
+}
+
+void bridge_set_sa(struct net_bridge * br, bool offlearning)
+{
+	struct net_bridge_port *p;
+
+	list_for_each_entry(p, &br->port_list, list) {
+		dsa_port_set_sa(p->dev, offlearning, false);    /* 重置网桥上各端口的offlearning属性 */
+	}
+}
+
+void bridge_port_set_sa(struct net_bridge *br, struct net_device * dev, bool join)
+{
+	struct net_device *slave;
+	bool offlearning_port = is_offlearning_dsa_slave_port(dev);
+
+	if (join)
+	{
+		if (offlearning_port)
+		{
+			if (0 == br->offlearning_port_count)
+			{
+				bridge_set_sa(br, true);
+			}
+
+			br->offlearning_port_count ++;
+		}
+
+		if (br->offlearning_port_count)
+		{
+			dsa_port_set_sa(dev, true, offlearning_port);
+		}
+	}
+	else
+	{
+		if (offlearning_port)
+		{
+			br->offlearning_port_count --;
+
+			if (0 == br->offlearning_port_count)
+			{
+				bridge_set_sa(br, false);
+			}
+
+			dsa_port_set_sa(dev, false, offlearning_port);
+		}
+		else
+		{
+			if (br->offlearning_port_count)
+			{
+				dsa_port_set_sa(dev, false, false);
+			}
+		}
+	}
+}
+#endif
 
 /*
  * Determine initial path cost based on speed.
@@ -361,6 +524,11 @@ static void del_nbp(struct net_bridge_port *p)
 	br_netpoll_disable(p);
 
 	call_rcu(&p->rcu, destroy_nbp_rcu);
+	
+#if defined(CONFIG_TP_IMAGE) && defined(CONFIG_NET_DSA_MT7530)
+	bridge_port_set_sa(br, dev, false);
+#endif
+	
 }
 
 /* Delete bridge device */
@@ -428,6 +596,9 @@ static struct net_bridge_port *new_nbp(struct net_bridge *br,
 	p->flags = BR_LEARNING | BR_FLOOD | BR_MCAST_FLOOD | BR_BCAST_FLOOD;
 	br_init_port(p);
 	br_set_state(p, BR_STATE_DISABLED);
+#if defined(CONFIG_TP_IMAGE) && defined(CONFIG_BRIDGE_VLAN_TP)
+	p->vlan_id = 0;
+#endif	
 	br_stp_port_timer_init(p);
 	err = br_multicast_add_port(p);
 	if (err) {
@@ -632,6 +803,10 @@ int br_add_if(struct net_bridge *br, struct net_device *dev,
 
 	dev_disable_lro(dev);
 
+#if defined(CONFIG_TP_IMAGE) && defined(CONFIG_NET_DSA_MT7530)
+	bridge_port_set_sa(br, dev, true);
+#endif
+
 	list_add_rcu(&p->list, &br->port_list);
 
 	nbp_update_port_count(br);
@@ -680,7 +855,9 @@ int br_add_if(struct net_bridge *br, struct net_device *dev,
 	br_set_gso_limits(br);
 
 	kobject_uevent(&p->kobj, KOBJ_ADD);
-
+#ifdef CONFIG_TP_HYFI_BRIDGE
+	call_netdevice_notifiers(NETDEV_BR_JOIN, dev);
+#endif
 	return 0;
 
 err7:
@@ -713,7 +890,9 @@ int br_del_if(struct net_bridge *br, struct net_device *dev)
 	p = br_port_get_rtnl(dev);
 	if (!p || p->br != br)
 		return -EINVAL;
-
+#ifdef CONFIG_TP_HYFI_BRIDGE
+	call_netdevice_notifiers(NETDEV_BR_LEAVE, dev);
+#endif
 	/* Since more than one interface can be attached to a bridge,
 	 * there still maybe an alternate path for netconsole to use;
 	 * therefore there is no reason for a NETDEV_RELEASE event.
@@ -757,3 +936,87 @@ bool br_port_flag_is_set(const struct net_device *dev, unsigned long flag)
 	return p->flags & flag;
 }
 EXPORT_SYMBOL_GPL(br_port_flag_is_set);
+
+#if defined(CONFIG_TP_IMAGE) || defined(CONFIG_TP_HYFI_BRIDGE)
+/* br_port_dev_get()
+ *      If a skb is provided, and the br_port_dev_get_hook_t hook exists,
+ *      use that to try and determine the egress port for that skb.
+ *      If not, or no egress port could be determined, use the given addr
+ *      to identify the port to which it is reachable,
+ *	returing a reference to the net device associated with that port.
+ *
+ * NOTE: Return NULL if given dev is not a bridge or the mac has no
+ * associated port.
+ */
+struct net_device *br_port_dev_get(struct net_device *dev, unsigned char *addr,
+				   struct sk_buff *skb,
+				   unsigned int cookie)
+{
+	struct net_bridge_fdb_entry *fdbe;
+	struct net_bridge *br;
+	struct net_device *netdev = NULL;
+
+	/* Is this a bridge? */
+	if (!(dev->priv_flags & IFF_EBRIDGE))
+		return NULL;
+
+	rcu_read_lock();
+
+	/* If the hook exists and the skb isn't NULL, try and get the port */
+	if (skb) {
+		br_port_dev_get_hook_t *port_dev_get_hook;
+
+		port_dev_get_hook = rcu_dereference(br_port_dev_get_hook);
+		if (port_dev_get_hook) {
+			struct net_bridge_port *pdst =
+				__br_get(port_dev_get_hook, NULL, dev, skb,
+					 addr, cookie);
+			if (pdst) {
+				dev_hold(pdst->dev);
+				netdev = pdst->dev;
+				goto out;
+			}
+		}
+	}
+
+	/* Either there is no hook, or can't
+	 * determine the port to use - fall back to using FDB
+	 */
+
+	br = netdev_priv(dev);
+
+	/* Lookup the fdb entry and get reference to the port dev */
+	fdbe = br_fdb_find_rcu(br, addr, 0);
+	if (fdbe && fdbe->dst) {
+		netdev = fdbe->dst->dev; /* port device */
+		dev_hold(netdev);
+	}
+out:
+	rcu_read_unlock();
+	return netdev;
+}
+EXPORT_SYMBOL_GPL(br_port_dev_get);
+
+/* Update bridge statistics for bridge packets processed by offload engines */
+void br_dev_update_stats(struct net_device *dev,
+			 struct rtnl_link_stats64 *nlstats)
+{
+	struct net_bridge *br;
+	struct pcpu_sw_netstats *stats;
+
+	/* Is this a bridge? */
+	if (!(dev->priv_flags & IFF_EBRIDGE))
+		return;
+
+	br = netdev_priv(dev);
+	stats = per_cpu_ptr(br->stats, 0);
+
+	u64_stats_update_begin(&stats->syncp);
+	stats->rx_packets += nlstats->rx_packets;
+	stats->rx_bytes += nlstats->rx_bytes;
+	stats->tx_packets += nlstats->tx_packets;
+	stats->tx_bytes += nlstats->tx_bytes;
+	u64_stats_update_end(&stats->syncp);
+}
+EXPORT_SYMBOL_GPL(br_dev_update_stats);
+#endif /* CONFIG_TP_IMAGE */

@@ -37,6 +37,12 @@ static int fdb_insert(struct net_bridge *br, struct net_bridge_port *source,
 static void fdb_notify(struct net_bridge *br,
 		       const struct net_bridge_fdb_entry *, int, bool);
 
+#ifdef CONFIG_TP_HYFI_BRIDGE
+/* Hook for external compat port check */
+br_ports_compatible_hook_t __rcu *br_ports_compatible_hook __read_mostly;
+EXPORT_SYMBOL_GPL(br_ports_compatible_hook);
+#endif /*CONFIG_TP_HYFI_BRIDGE*/
+
 int __init br_fdb_init(void)
 {
 	br_fdb_cache = kmem_cache_create("bridge_fdb_cache",
@@ -146,6 +152,9 @@ struct net_bridge_fdb_entry *br_fdb_find_rcu(struct net_bridge *br,
 {
 	return fdb_find_rcu(&br->fdb_hash_tbl, addr, vid);
 }
+#ifdef CONFIG_TP_IMAGE
+EXPORT_SYMBOL_GPL(br_fdb_find_rcu);
+#endif
 
 /* When a static FDB entry is added, the mac address from the entry is
  * added to the bridge private HW address list and all required ports
@@ -408,7 +417,7 @@ void br_fdb_delete_by_port(struct net_bridge *br,
 	spin_unlock_bh(&br->hash_lock);
 }
 
-#if IS_ENABLED(CONFIG_ATM_LANE)
+#if IS_ENABLED(CONFIG_ATM_LANE) || (defined CONFIG_X_TP_VLAN)
 /* Interface used by ATM LANE hook to test
  * if an addr is on some other bridge port */
 int br_fdb_test_addr(struct net_device *dev, unsigned char *addr)
@@ -559,6 +568,9 @@ void br_fdb_update(struct net_bridge *br, struct net_bridge_port *source,
 {
 	struct net_bridge_fdb_entry *fdb;
 	bool fdb_modified = false;
+#ifdef CONFIG_TP_HYFI_BRIDGE
+	bool fdb_compat = false;
+#endif /*CONFIG_TP_HYFI_BRIDGE*/
 
 	/* some users want to always flood. */
 	if (hold_time(br) == 0)
@@ -581,6 +593,7 @@ void br_fdb_update(struct net_bridge *br, struct net_bridge_port *source,
 
 			/* fastpath: update of existing entry */
 			if (unlikely(source != fdb->dst && !fdb->is_sticky)) {
+				br_switchdev_fdb_notify(br, fdb, RTM_DELNEIGH);
 				fdb->dst = source;
 				fdb_modified = true;
 				/* Take over HW learned entry */
@@ -591,9 +604,18 @@ void br_fdb_update(struct net_bridge *br, struct net_bridge_port *source,
 				fdb->updated = now;
 			if (unlikely(added_by_user))
 				fdb->added_by_user = 1;
+#ifdef CONFIG_TP_HYFI_BRIDGE
+			br_ports_compatible_hook_t *ports_compatible_hook;
+			ports_compatible_hook = rcu_dereference(br_ports_compatible_hook);
+			if (ports_compatible_hook && ports_compatible_hook(source, fdb->dst))
+				fdb_compat = true;
+#endif /*CONFIG_TP_HYFI_BRIDGE*/
 			if (unlikely(fdb_modified)) {
 				trace_br_fdb_update(br, source, addr, vid, added_by_user);
-				fdb_notify(br, fdb, RTM_NEWNEIGH, true);
+#ifdef CONFIG_TP_HYFI_BRIDGE
+				if(!fdb_compat)
+#endif /*CONFIG_TP_HYFI_BRIDGE*/
+					fdb_notify(br, fdb, RTM_NEWNEIGH, true);
 			}
 		}
 	} else {
@@ -612,6 +634,61 @@ void br_fdb_update(struct net_bridge *br, struct net_bridge_port *source,
 		spin_unlock(&br->hash_lock);
 	}
 }
+
+#ifdef CONFIG_TP_IMAGE
+
+ATOMIC_NOTIFIER_HEAD(br_fdb_update_notifier_list);
+
+void br_fdb_update_register_notify(struct notifier_block *nb)
+{
+	atomic_notifier_chain_register(&br_fdb_update_notifier_list, nb);
+}
+EXPORT_SYMBOL_GPL(br_fdb_update_register_notify);
+
+void br_fdb_update_unregister_notify(struct notifier_block *nb)
+{
+	atomic_notifier_chain_unregister(&br_fdb_update_notifier_list, nb);
+}
+EXPORT_SYMBOL_GPL(br_fdb_update_unregister_notify);
+
+/* Refresh FDB entries for bridge packets being forwarded by offload engines */
+void br_refresh_fdb_entry(struct net_device *dev, const char *addr)
+{
+	struct net_bridge_port *p = br_port_get_rcu(dev);
+
+	if (!p || p->state == BR_STATE_DISABLED)
+		return;
+
+	if (!is_valid_ether_addr(addr)) {
+		pr_info("bridge: Attempt to refresh with invalid ether address %pM\n",
+			addr);
+		return;
+	}
+
+	rcu_read_lock();
+	br_fdb_update(p->br, p, addr, 0, true);
+	rcu_read_unlock();
+}
+EXPORT_SYMBOL_GPL(br_refresh_fdb_entry);
+
+/* Look up the MAC address in the device's bridge fdb table */
+struct net_bridge_fdb_entry *br_fdb_has_entry(struct net_device *dev,
+					      const char *addr, __u16 vid)
+{
+	struct net_bridge_port *p = br_port_get_rcu(dev);
+	struct net_bridge_fdb_entry *fdb;
+
+	if (!p || p->state == BR_STATE_DISABLED)
+		return NULL;
+
+	rcu_read_lock();
+	fdb = br_fdb_find_rcu(p->br, addr, vid);
+	rcu_read_unlock();
+
+	return fdb;
+}
+EXPORT_SYMBOL_GPL(br_fdb_has_entry);
+#endif /* CONFIG_TP_IMAGE */
 
 static int fdb_to_nud(const struct net_bridge *br,
 		      const struct net_bridge_fdb_entry *fdb)
@@ -696,7 +773,7 @@ static void fdb_notify(struct net_bridge *br,
 	int err = -ENOBUFS;
 
 	if (swdev_notify)
-		br_switchdev_fdb_notify(fdb, type);
+		br_switchdev_fdb_notify(br, fdb, type);
 
 	skb = nlmsg_new(fdb_nlmsg_size(), GFP_ATOMIC);
 	if (skb == NULL)
@@ -709,6 +786,9 @@ static void fdb_notify(struct net_bridge *br,
 		kfree_skb(skb);
 		goto errout;
 	}
+#ifdef CONFIG_TP_HYFI_BRIDGE
+	__br_notify(RTNLGRP_NEIGH, type, fdb);
+#endif /* CONFIG_TP_HYFI_BRIDGE */
 	rtnl_notify(skb, net, 0, RTNLGRP_NEIGH, NULL, GFP_ATOMIC);
 	return;
 errout:

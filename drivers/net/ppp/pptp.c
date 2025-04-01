@@ -36,6 +36,12 @@
 
 #include <linux/uaccess.h>
 
+#if (defined CONFIG_TP_IMAGE) && (defined CONFIG_SFE_PPP_HEADER)
+int (*sfe_ppp_pptpParsePtr)(struct sk_buff *skb) __rcu __read_mostly;
+EXPORT_SYMBOL_GPL(sfe_ppp_pptpParsePtr);
+
+#endif
+
 #define PPTP_DRIVER_VERSION "0.8.5"
 
 #define MAX_CALLID 65535
@@ -90,6 +96,87 @@ static int lookup_chan_dst(u16 call_id, __be32 d_addr)
 	return i < MAX_CALLID;
 }
 
+#ifdef CONFIG_TP_IMAGE
+/* Search a pptp session based on local call id, local and remote ip address */
+static int lookup_session_src(struct pptp_opt *opt, u16 call_id, __be32 daddr, __be32 saddr)
+{
+	struct pppox_sock *sock;
+	int i = 1;
+
+	rcu_read_lock();
+	for_each_set_bit_from(i, callid_bitmap, MAX_CALLID) {
+		sock = rcu_dereference(callid_sock[i]);
+		if (!sock)
+			continue;
+
+		if (sock->proto.pptp.src_addr.call_id == call_id &&
+		    sock->proto.pptp.dst_addr.sin_addr.s_addr == daddr &&
+		    sock->proto.pptp.src_addr.sin_addr.s_addr == saddr) {
+			sock_hold(sk_pppox(sock));
+			memcpy(opt, &sock->proto.pptp, sizeof(struct pptp_opt));
+			sock_put(sk_pppox(sock));
+			rcu_read_unlock();
+			return 0;
+		}
+	}
+	rcu_read_unlock();
+	return -EINVAL;
+}
+
+/* Search a pptp session based on peer call id and peer ip address */
+static int lookup_session_dst(struct pptp_opt *opt, u16 call_id, __be32 d_addr)
+{
+	struct pppox_sock *sock;
+	int i = 1;
+
+	rcu_read_lock();
+	for_each_set_bit_from(i, callid_bitmap, MAX_CALLID) {
+		sock = rcu_dereference(callid_sock[i]);
+		if (!sock)
+			continue;
+
+		if (sock->proto.pptp.dst_addr.call_id == call_id &&
+		    sock->proto.pptp.dst_addr.sin_addr.s_addr == d_addr) {
+			sock_hold(sk_pppox(sock));
+			memcpy(opt, &sock->proto.pptp, sizeof(struct pptp_opt));
+			sock_put(sk_pppox(sock));
+			rcu_read_unlock();
+			return 0;
+		}
+	}
+	rcu_read_unlock();
+	return -EINVAL;
+}
+
+/* pptp_session_find()
+ *	Search and return a PPTP session info based on peer callid and IP
+ *	address. The function accepts the parameters in network byte order.
+ */
+int pptp_session_find(struct pptp_opt *opt, __be16 peer_call_id,
+		      __be32 peer_ip_addr)
+{
+	if (!opt)
+		return -EINVAL;
+
+	return lookup_session_dst(opt, ntohs(peer_call_id), peer_ip_addr);
+}
+EXPORT_SYMBOL(pptp_session_find);
+
+/* pptp_session_find_by_src_callid()
+ *	Search and return a PPTP session info based on src callid and IP
+ *	address. The function accepts the parameters in network byte order.
+ */
+int pptp_session_find_by_src_callid(struct pptp_opt *opt, __be16 src_call_id,
+		      __be32 daddr, __be32 saddr)
+{
+	if (!opt)
+		return -EINVAL;
+
+	return lookup_session_src(opt, ntohs(src_call_id), daddr, saddr);
+}
+EXPORT_SYMBOL(pptp_session_find_by_src_callid);
+#endif /* CONFIG_TP_IMAGE */
+
 static int add_chan(struct pppox_sock *sock,
 		    struct pptp_addr *sa)
 {
@@ -141,7 +228,9 @@ static int pptp_xmit(struct ppp_channel *chan, struct sk_buff *skb)
 	int len;
 	unsigned char *data;
 	__u32 seq_recv;
-
+#if (defined CONFIG_TP_IMAGE) && (defined CONFIG_SFE_PPP_HEADER)
+	int (*ppp_parse)(struct sk_buff *skb) = NULL;
+#endif
 
 	struct rtable *rt;
 	struct net_device *tdev;
@@ -151,11 +240,20 @@ static int pptp_xmit(struct ppp_channel *chan, struct sk_buff *skb)
 	if (sk_pppox(po)->sk_state & PPPOX_DEAD)
 		goto tx_error;
 
-	rt = ip_route_output_ports(net, &fl4, NULL,
-				   opt->dst_addr.sin_addr.s_addr,
-				   opt->src_addr.sin_addr.s_addr,
-				   0, 0, IPPROTO_GRE,
-				   RT_TOS(0), 0);
+#ifndef CONFIG_TP_IMAGE
+		rt = ip_route_output_ports(net, &fl4, NULL,
+					   opt->dst_addr.sin_addr.s_addr,
+					   opt->src_addr.sin_addr.s_addr,
+					   0, 0, IPPROTO_GRE,
+					   RT_TOS(0), 0);
+#else
+		rt = ip_route_output_ports(net, &fl4, NULL,
+						 opt->dst_addr.sin_addr.s_addr,
+						 opt->src_addr.sin_addr.s_addr,
+						 0, 0, IPPROTO_GRE,
+						 RT_TOS(0), sk->sk_bound_dev_if);
+#endif /*CONFIG_TP_IMAGE*/
+
 	if (IS_ERR(rt))
 		goto tx_error;
 
@@ -204,7 +302,8 @@ static int pptp_xmit(struct ppp_channel *chan, struct sk_buff *skb)
 	hdr->gre_hd.protocol = GRE_PROTO_PPP;
 	hdr->call_id = htons(opt->dst_addr.call_id);
 
-	hdr->seq = htonl(++opt->seq_sent);
+	hdr->seq         = htonl(++opt->seq_sent);
+
 	if (opt->ack_sent != seq_recv)	{
 		/* send ack with this message */
 		hdr->gre_hd.flags |= GRE_ACK;
@@ -244,6 +343,16 @@ static int pptp_xmit(struct ppp_channel *chan, struct sk_buff *skb)
 	ip_select_ident(net, skb, NULL);
 	ip_send_check(iph);
 
+	/* add by wanghao */
+#if (defined CONFIG_TP_IMAGE) && (defined CONFIG_SFE_PPP_HEADER)
+	rcu_read_lock();
+	ppp_parse = rcu_dereference(sfe_ppp_pptpParsePtr);
+	if (ppp_parse) {
+		ppp_parse(skb);
+	}
+	rcu_read_unlock();
+#endif
+	
 	ip_local_out(net, skb->sk, skb);
 	return 1;
 
@@ -303,11 +412,19 @@ static int pptp_rcv_core(struct sock *sk, struct sk_buff *skb)
 
 	payload = skb->data + headersize;
 	/* check for expected sequence number */
+#if (defined CONFIG_TP_IMAGE) && (defined CONFIG_SFE_PPP_HEADER)
+	if (time_before(seq, opt->seq_recv + 1) || WRAPPED(opt->seq_recv, seq)) {
+#else
 	if (seq < opt->seq_recv + 1 || WRAPPED(opt->seq_recv, seq)) {
+#endif
 		if ((payload[0] == PPP_ALLSTATIONS) && (payload[1] == PPP_UI) &&
 				(PPP_PROTOCOL(payload) == PPP_LCP) &&
-				((payload[4] == PPP_LCP_ECHOREQ) || (payload[4] == PPP_LCP_ECHOREP)))
+				((payload[4] == PPP_LCP_ECHOREQ) || (payload[4] == PPP_LCP_ECHOREP))) {
+#if (defined CONFIG_TP_IMAGE) && (defined CONFIG_SFE_PPP_HEADER)
+			opt->seq_recv = seq; //set sequence back.
+#endif
 			goto allow_packet;
+		}
 	} else {
 		opt->seq_recv = seq;
 allow_packet:

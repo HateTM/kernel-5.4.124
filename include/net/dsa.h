@@ -42,6 +42,7 @@ struct phylink_link_state;
 #define DSA_TAG_PROTO_8021Q_VALUE		12
 #define DSA_TAG_PROTO_SJA1105_VALUE		13
 #define DSA_TAG_PROTO_KSZ8795_VALUE		14
+#define DSA_TAG_PROTO_RTL4_A_VALUE		17
 
 enum dsa_tag_protocol {
 	DSA_TAG_PROTO_NONE		= DSA_TAG_PROTO_NONE_VALUE,
@@ -59,6 +60,7 @@ enum dsa_tag_protocol {
 	DSA_TAG_PROTO_8021Q		= DSA_TAG_PROTO_8021Q_VALUE,
 	DSA_TAG_PROTO_SJA1105		= DSA_TAG_PROTO_SJA1105_VALUE,
 	DSA_TAG_PROTO_KSZ8795		= DSA_TAG_PROTO_KSZ8795_VALUE,
+	DSA_TAG_PROTO_RTL4_A		= DSA_TAG_PROTO_RTL4_A_VALUE,
 };
 
 struct packet_type;
@@ -212,6 +214,20 @@ struct dsa_port {
 	 * Original copy of the master netdev net_device_ops
 	 */
 	const struct net_device_ops *orig_ndo_ops;
+
+#ifdef CONFIG_TP_IMAGE
+	int offlearning_vif_count;
+
+	/* MT7530驱动和bridge/vlan/macvlan配合时，需要禁用source address learning，否则不能通信
+	 * 如：
+	 * br-wan: lan1 lan2
+	 * br-iptv: lan0.200 lan3
+	 * br-voip: lan0_3 lan4
+	 * 以上配置，br-iptv/br-voip上的端口，都需要关闭source address learning (lan0/lan3/lan4)
+	 * lan1、lan2可以开启source address learning
+	 * 在这里，使用offlearning_vif_count记录lanX关联的lanX.200/lanX_Y的网络接口个数
+	 */
+#endif
 };
 
 struct dsa_switch {
@@ -269,6 +285,18 @@ struct dsa_switch {
 	 * settings on ports if not hardware-supported
 	 */
 	bool			vlan_filtering_is_global;
+
+	/* Pass .port_vlan_add and .port_vlan_del to drivers even for bridges
+	 * that have vlan_filtering=0. All drivers should ideally set this (and
+	 * then the option would get removed), but it is unknown whether this
+	 * would break things or not.
+	 */
+	bool			configure_vlan_while_not_filtering;
+
+	/* Let DSA manage the FDB entries towards the CPU, based on the
+	 * software bridge database.
+	 */
+	bool			assisted_learning_on_cpu_port;
 
 	/* In case vlan_filtering_is_global is set, the VLAN awareness state
 	 * should be retrieved from here and not from the per-port settings.
@@ -392,7 +420,9 @@ struct dsa_switch_ops {
 	void	(*phylink_mac_link_up)(struct dsa_switch *ds, int port,
 				       unsigned int mode,
 				       phy_interface_t interface,
-				       struct phy_device *phydev);
+				       struct phy_device *phydev,
+				       int speed, int duplex,
+				       bool tx_pause, bool rx_pause);
 	void	(*phylink_fixed_state)(struct dsa_switch *ds, int port,
 				       struct phylink_link_state *state);
 	/*
@@ -489,7 +519,11 @@ struct dsa_switch_ops {
 				const unsigned char *addr, u16 vid);
 	int	(*port_fdb_dump)(struct dsa_switch *ds, int port,
 				 dsa_fdb_dump_cb_t *cb, void *data);
-
+#ifdef CONFIG_TP_IMAGE
+	int (*port_sa_state_set)(struct dsa_switch *ds, int port, bool offlearning);
+	int (*port_set_force_fwd_map)(struct dsa_switch *ds, int port);
+#endif
+	
 	/*
 	 * Multicast database
 	 */
@@ -587,6 +621,15 @@ static inline int dsa_switch_resume(struct dsa_switch *ds)
 }
 #endif /* CONFIG_PM_SLEEP */
 
+#if IS_ENABLED(CONFIG_NET_DSA)
+bool dsa_slave_dev_check(const struct net_device *dev);
+#else
+static inline bool dsa_slave_dev_check(const struct net_device *dev)
+{
+	return false;
+}
+#endif
+
 enum dsa_notifier_type {
 	DSA_PORT_REGISTER,
 	DSA_PORT_UNREGISTER,
@@ -643,6 +686,10 @@ int dsa_port_get_phy_strings(struct dsa_port *dp, uint8_t *data);
 int dsa_port_get_ethtool_phy_stats(struct dsa_port *dp, uint64_t *data);
 int dsa_port_get_phy_sset_count(struct dsa_port *dp);
 void dsa_port_phylink_mac_change(struct dsa_switch *ds, int port, bool up);
+
+#if defined(CONFIG_TP_IMAGE)
+void dsa_slave_join_bond_bridge(struct net_device * slave);
+#endif
 
 struct dsa_tag_driver {
 	const struct dsa_device_ops *ops;

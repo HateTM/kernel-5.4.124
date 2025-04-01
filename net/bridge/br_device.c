@@ -14,6 +14,10 @@
 #include <linux/ethtool.h>
 #include <linux/list.h>
 #include <linux/netfilter_bridge.h>
+#if IS_ENABLED(CONFIG_NF_FLOW_TABLE)
+#include <linux/netfilter.h>
+#include <net/netfilter/nf_flow_table.h>
+#endif
 
 #include <linux/uaccess.h>
 #include "br_private.h"
@@ -23,6 +27,13 @@
 
 const struct nf_br_ops __rcu *nf_br_ops __read_mostly;
 EXPORT_SYMBOL_GPL(nf_br_ops);
+
+/* add by wanghao */
+#ifdef CONFIG_TP_IMAGE
+int (*blocking_xmit)(struct sk_buff *skb) __rcu __read_mostly = NULL;
+EXPORT_SYMBOL_GPL(blocking_xmit);
+#endif
+/* add end */
 
 /* net device transmit always called with BH disabled */
 netdev_tx_t br_dev_xmit(struct sk_buff *skb, struct net_device *dev)
@@ -36,6 +47,26 @@ netdev_tx_t br_dev_xmit(struct sk_buff *skb, struct net_device *dev)
 	struct ethhdr *eth;
 	u16 vid = 0;
 
+#ifdef CONFIG_TP_HYFI_BRIDGE
+	struct net_bridge_port *pdst;
+	br_get_dst_hook_t *get_dst_hook;
+#endif /* CONFIG_TP_HYFI_BRIDGE */
+
+	/* add by wanghao */
+#ifdef CONFIG_TP_IMAGE
+	int (*block_xmit)(struct sk_buff *skb) = NULL;
+	rcu_read_lock();
+	block_xmit = rcu_dereference(blocking_xmit);
+	if (block_xmit) {
+		if (block_xmit(skb)) {
+			rcu_read_unlock();
+			kfree_skb(skb);
+			return NETDEV_TX_OK;
+		}
+	}
+	rcu_read_unlock();
+#endif
+	
 	rcu_read_lock();
 	nf_ops = rcu_dereference(nf_br_ops);
 	if (nf_ops && nf_ops->br_dev_xmit_hook(skb)) {
@@ -78,9 +109,18 @@ netdev_tx_t br_dev_xmit(struct sk_buff *skb, struct net_device *dev)
 	}
 
 	dest = eth_hdr(skb)->h_dest;
+#ifdef CONFIG_TP_HYFI_BRIDGE
+	get_dst_hook = rcu_dereference(br_get_dst_hook);
+#endif /*CONFIG_TP_HYFI_BRIDGE*/
+
 	if (is_broadcast_ether_addr(dest)) {
 		br_flood(br, skb, BR_PKT_BROADCAST, false, true);
 	} else if (is_multicast_ether_addr(dest)) {
+#if 0 //CONFIG_TP_HYFI_BRIDGE
+		br_multicast_handle_hook_t *multicast_handle_hook = rcu_dereference(br_multicast_handle_hook);
+		if (!__br_get(multicast_handle_hook, true, NULL, skb))
+			goto out;
+#endif /* CONFIG_TP_HYFI_BRIDGE */
 		if (unlikely(netpoll_tx_running(dev))) {
 			br_flood(br, skb, BR_PKT_MULTICAST, false, true);
 			goto out;
@@ -96,6 +136,12 @@ netdev_tx_t br_dev_xmit(struct sk_buff *skb, struct net_device *dev)
 			br_multicast_flood(mdst, skb, false, true);
 		else
 			br_flood(br, skb, BR_PKT_MULTICAST, false, true);
+#ifdef CONFIG_TP_HYFI_BRIDGE
+	}else if ((pdst = __br_get(get_dst_hook, NULL, NULL, &skb))) {
+		if (!skb)
+			goto out;
+		br_forward(pdst, skb, false, true);
+#endif /*CONFIG_TP_HYFI_BRIDGE*/
 	} else if ((dst = br_fdb_find_rcu(br, dest, vid)) != NULL) {
 		br_forward(dst->dst, skb, false, true);
 	} else {
@@ -382,6 +428,28 @@ static const struct ethtool_ops br_ethtool_ops = {
 	.get_link	= ethtool_op_get_link,
 };
 
+#if IS_ENABLED(CONFIG_NF_FLOW_TABLE)
+static int br_flow_offload_check(struct flow_offload_hw_path *path)
+{
+	struct net_device *dev = path->dev;
+	struct net_bridge *br = netdev_priv(dev);
+	struct net_bridge_fdb_entry *dst;
+
+	if (!(path->flags & FLOW_OFFLOAD_PATH_ETHERNET))
+		return -EINVAL;
+
+	dst = br_fdb_find_rcu(br, path->eth_dest, path->vlan_id);
+	if (!dst || !dst->dst)
+		return -ENOENT;
+
+	path->dev = dst->dst->dev;
+	if (path->dev->netdev_ops->ndo_flow_offload_check)
+		return path->dev->netdev_ops->ndo_flow_offload_check(path);
+
+	return 0;
+}
+#endif /* CONFIG_NF_FLOW_TABLE */
+
 static const struct net_device_ops br_netdev_ops = {
 	.ndo_open		 = br_dev_open,
 	.ndo_stop		 = br_dev_stop,
@@ -410,6 +478,9 @@ static const struct net_device_ops br_netdev_ops = {
 	.ndo_bridge_setlink	 = br_setlink,
 	.ndo_bridge_dellink	 = br_dellink,
 	.ndo_features_check	 = passthru_features_check,
+#if IS_ENABLED(CONFIG_NF_FLOW_TABLE)
+	.ndo_flow_offload_check	 = br_flow_offload_check,
+#endif
 };
 
 static struct device_type br_type = {

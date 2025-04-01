@@ -1147,6 +1147,18 @@ static inline int nla_parse_nested(struct nlattr *tb[], int maxtype,
 	return __nla_parse(tb, maxtype, nla_data(nla), nla_len(nla), policy,
 			   NL_VALIDATE_STRICT, extack);
 }
+#ifdef CONFIG_TP_IMAGE
+/*for v6plus sendfmr*/
+static inline int nla_parse_nested_old(struct nlattr *tb[], int maxtype,
+				   const struct nlattr *nla,
+				   const struct nla_policy *policy,
+				   struct netlink_ext_ack *extack)
+{
+
+	return __nla_parse(tb, maxtype, nla_data(nla), nla_len(nla), policy,
+			   NL_VALIDATE_DEPRECATED_STRICT, extack);
+}
+#endif
 
 /**
  * nla_parse_nested_deprecated - parse nested attributes

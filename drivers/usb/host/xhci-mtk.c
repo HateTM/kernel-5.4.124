@@ -18,9 +18,13 @@
 #include <linux/pm_runtime.h>
 #include <linux/regmap.h>
 #include <linux/regulator/consumer.h>
+#include <linux/usb/of.h>
 
 #include "xhci.h"
 #include "xhci-mtk.h"
+#ifdef CONFIG_USB_XHCI_MTK_DEBUGFS
+#include "xhci-mtk-test.h"
+#endif
 
 /* ip_pw_ctrl0 register */
 #define CTRL0_IP_SW_RST	BIT(0)
@@ -559,6 +563,8 @@ static int xhci_mtk_probe(struct platform_device *pdev)
 		goto disable_device_wakeup;
 	}
 
+	hcd->tpl_support = of_usb_host_tpl_support(node);
+	xhci->shared_hcd->tpl_support = hcd->tpl_support;
 	ret = usb_add_hcd(hcd, irq, IRQF_SHARED);
 	if (ret)
 		goto put_usb3_hcd;
@@ -570,6 +576,9 @@ static int xhci_mtk_probe(struct platform_device *pdev)
 	ret = usb_add_hcd(xhci->shared_hcd, irq, IRQF_SHARED);
 	if (ret)
 		goto dealloc_usb2_hcd;
+#ifdef CONFIG_USB_XHCI_MTK_DEBUGFS
+	mu3h_hqa_create_attr(dev);
+#endif
 
 	return 0;
 
@@ -618,6 +627,9 @@ static int xhci_mtk_remove(struct platform_device *dev)
 	xhci_mtk_sch_exit(mtk);
 	xhci_mtk_clks_disable(mtk);
 	xhci_mtk_ldos_disable(mtk);
+#ifdef CONFIG_USB_XHCI_MTK_DEBUGFS
+	mu3h_hqa_remove_attr(&dev->dev);
+#endif
 
 	return 0;
 }

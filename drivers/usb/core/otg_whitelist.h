@@ -39,8 +39,43 @@ static struct usb_device_id whitelist_table[] = {
 { USB_DEVICE(0x0525, 0xa4a0), },
 #endif
 
+/* xhci-mtk usb3 root-hub */
+{ USB_DEVICE(0x1d6b, 0x0003), },
+
+/* xhci-mtk usb2 root-hub */
+{ USB_DEVICE(0x1d6b, 0x0002), },
+
+/*  */
+{ USB_INTERFACE_INFO(USB_CLASS_MASS_STORAGE, 0, 0) },
+
 { }	/* Terminating entry */
 };
+
+static bool usb_match_any_interface(struct usb_device *udev,
+				    const struct usb_device_id *id)
+{
+	unsigned int i;
+
+	for (i = 0; i < udev->descriptor.bNumConfigurations; ++i) {
+		struct usb_host_config *cfg = &udev->config[i];
+		unsigned int j;
+
+		for (j = 0; j < cfg->desc.bNumInterfaces; ++j) {
+			struct usb_interface_cache *cache;
+			struct usb_host_interface *intf;
+
+			cache = cfg->intf_cache[j];
+			if (cache->num_altsetting == 0)
+				continue;
+
+			intf = &cache->altsetting[0];
+			if (id->bInterfaceClass == intf->desc.bInterfaceClass)
+				return true;
+		}
+	}
+
+	return false;
+}
 
 static int is_targeted(struct usb_device *dev)
 {
@@ -88,6 +123,10 @@ static int is_targeted(struct usb_device *dev)
 
 		if ((id->match_flags & USB_DEVICE_ID_MATCH_DEV_PROTOCOL) &&
 		    (id->bDeviceProtocol != dev->descriptor.bDeviceProtocol))
+			continue;
+
+		if ((id->match_flags & USB_DEVICE_ID_MATCH_INT_INFO) &&
+		    !usb_match_any_interface(dev, id))
 			continue;
 
 		return 1;

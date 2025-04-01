@@ -52,6 +52,53 @@ struct br_ip_list {
 
 extern void brioctl_set(int (*ioctl_hook)(struct net *, unsigned int, void __user *));
 
+#ifdef CONFIG_TP_IMAGE
+extern struct net_device *br_port_dev_get(struct net_device *dev,
+					  unsigned char *addr,
+					  struct sk_buff *skb,
+					  unsigned int cookie);
+extern void br_refresh_fdb_entry(struct net_device *dev, const char *addr);
+extern void br_dev_update_stats(struct net_device *dev,
+				struct rtnl_link_stats64 *nlstats);
+extern struct net_bridge_fdb_entry *br_fdb_has_entry(struct net_device *dev,
+						     const char *addr,
+						     __u16 vid);
+extern void br_fdb_update_register_notify(struct notifier_block *nb);
+extern void br_fdb_update_unregister_notify(struct notifier_block *nb);
+
+typedef struct net_bridge_port *br_port_dev_get_hook_t(struct net_device *dev,
+						       struct sk_buff *skb,
+						       unsigned char *addr,
+						       unsigned int cookie);
+extern br_port_dev_get_hook_t __rcu *br_port_dev_get_hook;
+
+typedef void (br_notify_hook_t)(int group, int event, const void *ptr);
+extern br_notify_hook_t __rcu *br_notify_hook;
+
+typedef int (br_multicast_handle_hook_t)(const struct net_bridge_port *src,
+		struct sk_buff *skb);
+extern br_multicast_handle_hook_t __rcu *br_multicast_handle_hook;
+
+#endif /* CONFIG_TP_IMAGE */
+
+#ifdef CONFIG_TP_HYFI_BRIDGE
+typedef struct net_bridge_port *br_get_dst_hook_t(const struct net_bridge_port *src,struct sk_buff **skb);
+extern br_get_dst_hook_t __rcu *br_get_dst_hook;
+
+typedef struct net_bridge_port *br_port_dev_get_hook_t(struct net_device *dev,struct sk_buff *skb, unsigned char *addr, unsigned int cookie);
+extern br_port_dev_get_hook_t __rcu *br_port_dev_get_hook;
+
+typedef int (br_multicast_handle_hook_t)(const struct net_bridge_port *src,	struct sk_buff *skb);
+extern br_multicast_handle_hook_t __rcu *br_multicast_handle_hook;
+
+typedef void (br_notify_hook_t)(int group, int event, const void *ptr);
+extern br_notify_hook_t __rcu *br_notify_hook;
+
+typedef bool (br_ports_compatible_hook_t)(const struct net_bridge_port* port1, const struct net_bridge_port* port2);
+extern br_ports_compatible_hook_t __rcu *br_ports_compatible_hook;
+
+#endif /* CONFIG_TP_HYFI_BRIDGE */
+
 #if IS_ENABLED(CONFIG_BRIDGE) && IS_ENABLED(CONFIG_BRIDGE_IGMP_SNOOPING)
 int br_multicast_list_adjacent(struct net_device *dev,
 			       struct list_head *br_ip_list);

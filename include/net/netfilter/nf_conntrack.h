@@ -55,6 +55,16 @@ struct nf_conntrack_net {
 #include <net/netfilter/ipv4/nf_conntrack_ipv4.h>
 #include <net/netfilter/ipv6/nf_conntrack_ipv6.h>
 
+/* added by CCy for wportal modules. When you remove hw and sw accelarator, 
+   that is when this flag is used. This flag prevent you from handle every packet of a conntract. 
+   With this flag, you can only handle the first packet of a conntract, so you won't cause  
+   throughput to decrease dramatically. */
+#if defined(CONFIG_TP_IMAGE)
+#define WPORTAL_FLAG_HANDLED	(1 << 0)
+#define WPORTAL_FLAG_CACHE_ALL	(1 << 1)
+#define WPORTAL_FLAG_NOT_ACCEL	(1 << 2)
+#endif
+
 struct nf_conn {
 	/* Usage count in here is 1 for hash table, 1 per skb,
 	 * plus 1 for any connection(s) we are `master' for
@@ -81,6 +91,11 @@ struct nf_conn {
 	unsigned long status;
 
 	u16		cpu;
+
+#ifdef CONFIG_TP_IMAGE
+	u_int8_t wportal_flag;
+#endif
+
 	possible_net_t ct_net;
 
 #if IS_ENABLED(CONFIG_NF_NAT)

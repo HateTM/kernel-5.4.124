@@ -208,6 +208,12 @@ static int dsa_switch_rcv(struct sk_buff *skb, struct net_device *dev,
 	struct pcpu_sw_netstats *s;
 	struct dsa_slave_priv *p;
 
+#ifdef CONFIG_TP_IMAGE
+#ifdef CONFIG_VLAN_SOFT_SWITCH_PORT_TAGGING
+	const struct tp_iptv_hooks *hooks;
+#endif
+#endif /*CONFIG_TP_IMAGE*/
+	
 	if (unlikely(!cpu_dp)) {
 		kfree_skb(skb);
 		return 0;
@@ -226,6 +232,18 @@ static int dsa_switch_rcv(struct sk_buff *skb, struct net_device *dev,
 	skb = nskb;
 	p = netdev_priv(skb->dev);
 	skb_push(skb, ETH_HLEN);
+
+#ifdef CONFIG_TP_IMAGE
+#ifdef CONFIG_VLAN_SOFT_SWITCH_PORT_TAGGING
+	rcu_read_lock();
+	hooks = rcu_dereference(iptv_hooks);
+	if (hooks) {
+		hooks->iptv_tagging_frame_hook(skb, p->dp->index, 1);
+	}
+	rcu_read_unlock();
+#endif
+#endif /*CONFIG_TP_IMAGE*/
+
 	skb->pkt_type = PACKET_HOST;
 	skb->protocol = eth_type_trans(skb, skb->dev);
 

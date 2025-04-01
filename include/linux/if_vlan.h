@@ -27,6 +27,19 @@
 
 #define VLAN_MAX_DEPTH	8		/* Max. number of nested VLAN tags parsed */
 
+#ifdef CONFIG_TP_IMAGE
+struct tp_iptv_hooks{
+	int (*iptv_check_tag_hook)(u16 vlan_tci);
+#ifdef CONFIG_VLAN_MULTICAST_IPTV	
+	u16 (*iptv_handle_frame_hook)(struct sk_buff *skb, u16 vlan_tci, int flag);
+#endif /*CONFIG_VLAN_MULTICAST_IPTV*/
+#ifdef CONFIG_VLAN_SOFT_SWITCH_PORT_TAGGING
+	int (*iptv_tagging_frame_hook)(struct sk_buff *skb, int port, bool is_rx);
+#endif
+};
+extern const struct tp_iptv_hooks *iptv_hooks;
+#endif /*CONFIG_TP_IMAGE*/
+
 /*
  * 	struct vlan_hdr - vlan header
  * 	@h_vlan_TCI: priority and VLAN ID
